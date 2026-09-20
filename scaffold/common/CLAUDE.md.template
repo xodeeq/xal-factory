@@ -1,0 +1,141 @@
+# CLAUDE.md — <SERVICE> (living source of truth)
+
+> **Seeded from the Xal Engineering Process scaffold.** The seeder filled the service's name
+> and the sections that are true of every repo under the process. **Every remaining `<…>`
+> placeholder is a section this service has not decided yet** — they are not decoration,
+> and a session that needs one answers it deliberately (usually in an ADR) rather than
+> inventing prose to fill the gap. Keep the section structure: it is the shape every repo's
+> context follows. Delete this banner when no `<…>` remains.
+
+This file is the durable context for the `<SERVICE>` service. Keep it current as the service
+evolves. For the shared engineering lifecycle, see the vendored process guide at
+`docs/process/process-guide.md`.
+
+---
+
+## Start here (every session — read this before touching code)
+
+1. **Read the latest handoff.** Handoffs live in `docs/sessions/NN.md`; open the
+   **highest-numbered** one — it tells you what the last session did, what's next, and any
+   open questions. Don't reconstruct state from the codebase; the handoff is the entry point.
+   Also read any **advisory brief** in `docs/briefs/` (ephemeral — delete the one you consume
+   once your plan is approved). The `/begin-session` command runs this ritual.
+2. **Read the spec and the plan.** `docs/spec/` says what this service must be;
+   `docs/plan/plan.md` is the ordered session list and carries each session's status and
+   evidence. Between them they say what this service must be and where the build is.
+3. **This service's testing discipline is non-negotiable — see "How we work" below.** You are
+   expected to know it from the start, not rediscover it.
+4. **Check "Open design decisions" below** before planning — anything listed there is a
+   *known* gap, not something to assume is already designed.
+5. **One concern per session.** Each session takes one coherent, gated slice and wraps with
+   `/wrap-session`.
+6. <If this project keeps state outside the repo — a board, a status file — name it here,
+   say that every session reads it first and updates it last, and delete this placeholder.>
+
+## How we work — <testing discipline> (non-negotiable)
+
+<State this service's core development discipline. The recommended default is strict TDD:
+RED → GREEN → REFACTOR, no production code without a failing test first, with a ratcheted
+per-package coverage floor enforced by the gate script. State the law for this service and
+its gate command. This is a standing law, not a per-task instruction.>
+
+The gate is **`scripts/check.sh`** ("green locally == green in CI"). Read the gate names off
+the script; a prose tally here would go stale.
+
+## The bigger picture
+
+<What the wider system is and where this service sits in it: the other services, what
+composes them, what the stable thing every service shares is. One paragraph.>
+
+> **LANGUAGE IS AN IMPLEMENTATION DETAIL BEHIND A STANDARD CONTRACT.**
+> This service's stack is **<language/runtime>** (see `docs/adr/0001-stack-selection.md`),
+> chosen to fit its dominant concern.
+
+## Process conventions (this service conforms — do not redefine here)
+
+The language-agnostic contract every service satisfies lives in the **vendored process
+spec**, not in this file:
+- **`docs/process/service-conventions.md`** — health, telemetry, structured logs, trace
+  propagation, container interface, versioned event envelope, domain purity,
+  variation-behind-contract.
+- **`docs/process/deployment-conventions.md`** — runtime-as-code, migrations-as-release-step,
+  secrets/fail-fast, health wiring, smoke gate, CD-from-main.
+- **`docs/process/gate-discipline.md`** — what keeps `scripts/check.sh` trustworthy.
+
+These are read-only copies synced from the process repo (`docs/process/sync.config` pins
+the version). Mirror the **intent** in `<language>`; if a change would break an invariant,
+that's a contract-version ADR, not a quiet edit.
+
+---
+
+## Bounded context
+
+<What this service owns and — just as important — what it does NOT own. Cross-service effects
+happen by emitting domain events, never synchronous calls out. Name the one stable thing it
+shares with other services, if any.>
+
+## The variation-flag law
+
+<List this service's orthogonal variation flags (if any), each behind an INVARIANT contract:
+the core surface is identical across every flag combination; only the explicitly-allowed
+slice may differ. The host FAILS FAST if configured for a profile it can't serve. Anything
+that breaks the invariant core is a contract-version bump, not a new flag.>
+
+| Flag | Values (default first) | Status |
+|---|---|---|
+| _<flag>_ | _<value> \| <value>_ | _<built / planned>_ |
+
+## Domain model
+
+<The aggregate roots, value objects, key invariants (the testing targets), and the domain
+events this service raises.>
+
+## Ports (the seams)
+
+<The interfaces the domain/application own and the adapters that implement them in the outer
+layer — the injection points for time, randomness, persistence, and I/O (domain purity, spec
+§8).>
+
+## Solution structure & the dependency rule
+
+<The project/module layout and how the dependency rule is enforced (inner layers depend on
+nothing outward): a compiler-checked reference graph, an import linter, an architecture
+test. State this service's mechanism.>
+
+## Tech stack (decided — ADR-0001)
+
+<Host/framework, config + fail-fast, logging, metrics/tracing, health, data access,
+hashing/crypto, tests, and quality gates. Cite the stack ADR.>
+
+---
+
+## Open design decisions (known gaps — do NOT assume these are settled)
+
+<Documented intent whose mechanism is deliberately undecided. Surface these when on the
+critical path instead of rediscovering them from the code. "None currently open" is a valid
+state — add the next genuinely-undecided mechanism here when it appears.>
+
+## Phase status
+
+<Where the service is in the lifecycle (`docs/process/process-guide.md`), with a short bullet
+per completed session so a cold reader sees the trajectory. End with a "Next" bullet.>
+
+## Working agreements
+
+- **<testing discipline>, always** — see "How we work".
+- Conventional Commits; small logical commits; decisions explained in commit bodies or ADRs.
+- Keep the inner/domain layer free of framework dependencies and I/O.
+- **No secrets in code** — from env or the platform secret store.
+- **Ask before deviating from any decision** recorded in an `Accepted` ADR.
+- **Every new gate ships with a committed failing fixture** that names it, and declares its
+  inputs in `.xal/gate-inputs` before any workflow is touched.
+
+## Lessons & continuous improvement (standing directive)
+
+At the end of every session, before the handoff, review what happened and identify any
+pitfall, workaround, repeated explanation, or consequential decision. For each, propose its
+home: a **script** (mechanical task), a **skill/command** (recurring procedure), a **CLAUDE.md
+guardrail** (always-true rule), or an **ADR** (architectural decision). Append unresolved
+items to `docs/lessons.md`; never let a temporary workaround outlive its session without a
+tracked task to remove it. The `/wrap-session` ritual automates this; durable concept notes
+live under `docs/concepts/` (the `concept-note` skill).

@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "xal-engineering-process": {
+      "source": {
+        "source": "github",
+        "repo": "xodeeq/xal-engineering-process"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "xal-process@xal-engineering-process": true
+  }
+}

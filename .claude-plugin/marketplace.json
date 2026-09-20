@@ -1,0 +1,16 @@
+{
+  "name": "xal-engineering-process",
+  "owner": {
+    "name": "xodeeq",
+    "url": "https://github.com/xodeeq/xal-engineering-process"
+  },
+  "description": "The Xal Engineering Process for Claude Code: the session ritual, the concept-note discipline and the service conventions, distributed to every repo that follows the process.",
+  "plugins": [
+    {
+      "name": "xal-process",
+      "description": "/begin-session and /wrap-session, the concept-note skill, and the service-conventions skill that points at a repo's vendored docs/process/.",
+      "category": "engineering",
+      "source": "./plugins/xal-process"
+    }
+  ]
+}

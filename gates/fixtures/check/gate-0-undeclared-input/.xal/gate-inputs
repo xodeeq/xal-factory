@@ -1,0 +1,1 @@
+claude-cli | command:claude | yes | npm install -g @anthropic-ai/claude-code | The claude CLI, but this record has only five fields

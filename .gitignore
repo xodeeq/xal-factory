@@ -1,0 +1,5 @@
+# OS and editor noise.
+.DS_Store
+
+# Local Claude Code state (project settings are committed; personal overrides are not).
+.claude/settings.local.json

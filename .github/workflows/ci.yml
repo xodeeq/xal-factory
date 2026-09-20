@@ -1,0 +1,43 @@
+name: CI
+
+# Process repo CI. The Definition of Done is a single script — scripts/check.sh — which is
+# the one source of truth for "the gates". CI invokes that exact script so "green locally"
+# equals "green in CI" byte for byte. To change a gate, change the script, not this file.
+#
+# There is no build and no test suite here: this repo is docs/tooling/process. Most gates
+# need only bash, awk, grep, sed, find, diff and mktemp, all present on the runner. Gate 5
+# validates the plugin manifests and needs the `claude` CLI, which is installed below — the
+# only toolchain step, and the only INPUT this workflow supplies to the script. It is
+# declared in .xal/gate-inputs, and gate 0 asserts this workflow supplies it.
+#
+# The second step proves the gate script can FAIL, naming which gate fired. It is a separate
+# step, not a gate inside check.sh, because the harness runs check.sh and a gate that ran
+# the harness would recurse forever (spec/gate-discipline.md §5).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Gates (scripts/check.sh)
+    runs-on: ubuntu-latest
+    env:
+      CI: "true" # makes the plugin-manifest gate mandatory (never skipped)
+    steps:
+      - uses: actions/checkout@v4
+
+      # Input for gate 5. `claude plugin validate` is offline schema validation — it
+      # parses manifests and never calls the API — so no credential is needed here.
+      - name: Install the claude CLI (gate 5 input)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run gates (scripts/check.sh)
+        run: ./scripts/check.sh
+
+      - name: Prove the gates can fail (gates/check.test.sh)
+        run: ./gates/check.test.sh
