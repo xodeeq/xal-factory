@@ -36,6 +36,17 @@ Format: `source:path` → `factory path` · stripped · parameterized.
 | xal-platform:adr/0009-problem-document-convention.md | adr/0006-problem-document-convention.md | the per-unit audit table, follow-ups | condensed |
 | xal-company:docs/adr/0009-pipeline-driver-v0.md | adr/0007-pipeline-driver.md | run ids and costs, repo names, the PAT name, amendments as history | condensed; decisions renumbered |
 | xal-company:docs/adr/0010-pipeline-auto-merge.md | adr/0008-auto-merge-and-the-reader.md | the label name, the plugin name, the token name | `needs-<owner>` → escalation label |
+| xal-platform:scaffold/common/.github/workflows/{driver,chain,merge,reader}.yml | scaffold/common/.github/workflows/ | repo, person, run ids, roadmap stage names, the private platform checkout | ops repo, escalation label, models, turn caps, process repo, reader tag via `.xal/factory.conf`; tokens renamed FACTORY_READ_TOKEN and FACTORY_WRITE_TOKEN; reader status `factory/reader`; the `model` input no longer defaults, so chained runs use the configured model |
+| xal-platform:scaffold/common/scripts/driver/*.sh | scaffold/common/scripts/driver/ | the same | `fetch-spec.sh` takes `owner/repo:path` or falls back to the ops repo's owner; `merge-decision.sh` protects `docs/process/` (the vendored spec here) instead of `docs/platform/` |
+| (new) | scaffold/common/scripts/driver/config.sh | — | reads `.xal/factory.conf`, a default for every key, unknown keys refused |
+| xal-platform:scaffold/common/gates/driver.test.sh + _fixtures/ | scaffold/common/gates/ | names, approver | fixture spec digest recomputed after stripping |
+| xal-platform:scaffold/lang/go/.github/actions/toolchain, .xal/protected-paths | scaffold/lang/go/ | run history | — |
+| xal-platform:scaffold/{seed-service.sh,README.md,common,lang/go} (3-way merge from 27dfe29) | scaffold/ | the private-platform read token, the Mac runner, the board token | `--ops-repo`, `.xal/factory.conf`, `<VERSION>` placeholder |
+| xal-platform:scripts/check-seed-set.sh + gates/fixtures/seed | scripts/, gates/fixtures/seed/ | — | rule 5 requires `scripts/driver/config.sh`; `run-session.md` ships in the plugin, not common/ |
+| xal-platform:scaffold/common/.claude/commands/run-session.md | plugins/xal-factory/commands/run-session.md | the workspace repo, the person, stage names | adds the dispatch step it lacked |
+| xal-company:plugins/xcos-core/agents/reader.md | plugins/xal-factory/agents/reader.md | company frontmatter, requirement id | — |
+| xal-company:plugins/xcos-core/commands/{explain,idea}.md | plugins/xal-factory/commands/ | version marker; the company repo | `/idea` finds the ops repo from env, conf, or the current repo |
+| xal-company:scripts/reader-eval.sh, gates/reader-eval.test.sh, gates/fixtures/reader, .github/workflows/reader-eval.yml | same paths | plugin name, run id | gate 9 here |
 
 ## Deferred
 
@@ -48,3 +59,6 @@ bring it in. Nothing enters without a caller.
 | xal-platform:adr/0003, 0005 (visibility, feed credential) | product-specific | none |
 | xal-platform:adr/0006, 0007, 0008 | already re-recorded as adr/0002, 0003, 0004 on 2026-09-20 | none |
 | xal-company:docs/adr/0001-0004, 0006, 0007 | product or company specific | none |
+| xal-platform:scaffold/common/.github/workflows/board-add.yml | dropped at the first extraction and still dropped | `ops.board = github-projects` gains a caller |
+| xal-company:plugins/xcos-core/commands/wrap-session.md | the factory's own generalized `/wrap-session` (2026-09-20) is kept | a ritual step the factory lacks proves itself |
+| xal-org: the three driver scripts that differ from the scaffold | the scaffold copy is canonical; the differences are older copies in that service, pending its re-sync | none |

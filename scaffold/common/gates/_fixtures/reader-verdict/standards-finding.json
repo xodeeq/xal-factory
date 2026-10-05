@@ -1,0 +1,1 @@
+{"standards":"FINDINGS","spec":"PASS","findings":[{"axis":"standards","ref":"CLAUDE.md coverage floor","where":"coverage-floors","what":"a floor was lowered from 98 to 90"}]}

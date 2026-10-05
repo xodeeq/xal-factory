@@ -478,6 +478,25 @@ strip_step() {
   return 0
 }
 
+# --- gate 9: the reader's evaluator can fail ----------------------------------------------
+# The reader agent (plugins/xal-factory/agents/reader.md) is the merge gate's judgement half,
+# and a release of it is cut only after .github/workflows/reader-eval.yml has run the real
+# reader over gates/fixtures/reader/ and scripts/reader-eval.sh has judged its verdicts. That
+# run costs tokens, so it does not run here. What runs here, free, is the evaluator's own
+# proof: canned verdicts under gates/fixtures/reader/verdicts/ that it must pass and must
+# fail. An evaluator that would pass a reader which missed the omission is caught before any
+# reader is ever run. jq is its one input, runner-provided and declared in .xal/gate-inputs.
+reader_eval_step() {
+  if ! command -v jq >/dev/null 2>&1; then
+    if [ "${CI:-}" = "true" ]; then
+      printf '%sjq is required in CI for the reader evaluator fixtures.%s\n' "$RED" "$RST"; return 1
+    fi
+    printf '%s⚠ jq unavailable: SKIPPING the reader evaluator fixtures (mandatory in CI).%s\n' "$YEL" "$RST"
+    return 0
+  fi
+  bash gates/reader-eval.test.sh
+}
+
 # --- run the gates -------------------------------------------------------------
 gate "gate inputs declared + every caller wired"            gate_inputs_step
 gate "plugin manifests (claude plugin validate --strict)"   plugin_manifests_step
@@ -487,6 +506,7 @@ gate "links resolve (+ vendored-set rule)"                  links_resolve_step
 gate "scaffold self-consistency"                            scaffold_consistency_step
 gate "seed-set fixtures (proven able to fail)"              seed_fixtures_step
 gate "seed sets complete (every language seeds a gate)"     seed_set_step
+gate "reader evaluator fixtures (proven able to fail)"     reader_eval_step
 gate "sync round-trip"                                      sync_roundtrip_step
 
 summary

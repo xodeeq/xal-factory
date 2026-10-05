@@ -20,17 +20,30 @@ evolves. For the shared engineering lifecycle, see the vendored process guide at
    open questions. Don't reconstruct state from the codebase; the handoff is the entry point.
    Also read any **advisory brief** in `docs/briefs/` (ephemeral — delete the one you consume
    once your plan is approved). The `/begin-session` command runs this ritual.
-2. **Read the spec and the plan.** `docs/spec/` says what this service must be;
+2. **To BUILD a plan session, do not write it: dispatch the driver.**
+   `/run-session <SID>` (from the `xal-factory` plugin) runs one session of
+   `docs/plan/plan.md` headless via `.github/workflows/driver.yml`. `chain.yml` selects and
+   dispatches the next one when a session merges, and `merge.yml` lands a finished session
+   with no person present only when every merge condition holds, after the reader
+   (`reader.yml`) has read it. **A session asked to "run S2" that writes S2 by hand has
+   bypassed the pipeline**: no machine-authored commits, no gate run by the workflow, no
+   status written into the plan. Which of these run, and how much may merge unattended, is
+   this repo's configuration (`.xal/factory.conf`). The decisions are
+   [ADR-0007](https://github.com/xodeeq/xal-factory/blob/main/adr/0007-pipeline-driver.md)
+   and [ADR-0008](https://github.com/xodeeq/xal-factory/blob/main/adr/0008-auto-merge-and-the-reader.md).
+3. **Read the spec pointer and the plan.** `docs/spec/service.md` names the admitted spec
+   this service is built against, by `service` + `spec_version` + ledger digest;
    `docs/plan/plan.md` is the ordered session list and carries each session's status and
    evidence. Between them they say what this service must be and where the build is.
-3. **This service's testing discipline is non-negotiable — see "How we work" below.** You are
+4. **This service's testing discipline is non-negotiable — see "How we work" below.** You are
    expected to know it from the start, not rediscover it.
-4. **Check "Open design decisions" below** before planning — anything listed there is a
+5. **Check "Open design decisions" below** before planning — anything listed there is a
    *known* gap, not something to assume is already designed.
-5. **One concern per session.** Each session takes one coherent, gated slice and wraps with
+6. **One concern per session.** Each session takes one coherent, gated slice and wraps with
    `/wrap-session`.
-6. <If this project keeps state outside the repo — a board, a status file — name it here,
-   say that every session reads it first and updates it last, and delete this placeholder.>
+7. **Read the factory's status file first and update it last.** It lives in the ops repo
+   (`status/current.md`): the active build track, the next action, and what waits on the
+   owner. <Name the ops repo here, and delete this placeholder.>
 
 ## How we work — <testing discipline> (non-negotiable)
 
@@ -40,7 +53,12 @@ per-package coverage floor enforced by the gate script. State the law for this s
 its gate command. This is a standing law, not a per-task instruction.>
 
 The gate is **`scripts/check.sh`** ("green locally == green in CI"). Read the gate names off
-the script; a prose tally here would go stale.
+the script; a prose tally here would go stale. Its gate 0 asserts that every workflow calling
+it supplies every input `.xal/gate-inputs` declares. **`gates/check.test.sh` is the proof the
+gate can fail**, and **`gates/driver.test.sh` is the same proof for the pipeline**: the
+driver refuses an unapproved plan, a session already run, a dependency not passed; the chain
+and the merge workflows hold the shape their rules demand; a session lands unattended only
+when every merge condition holds. Both suites are seeded with the repository and run in CI.
 
 ## The bigger picture
 

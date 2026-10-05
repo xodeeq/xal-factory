@@ -1,0 +1,15 @@
+# A job-level env block using only contexts that exist before a runner is assigned.
+name: Clean
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PLAN: docs/plan/plan.md
+      SESSION: ${{ inputs.session }}
+      LEDGER_PATH: ${{ steps.x.outputs.y }}
+    steps:
+      - name: Use the runner temp dir the way that works
+        run: |
+          LEDGER="$RUNNER_TEMP/spend/costs.jsonl"
+          printf '%s\n' "$LEDGER"

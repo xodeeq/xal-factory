@@ -1,0 +1,251 @@
+# reader.yml: the two-axis reader, on every driven session's pull request. ADR-0008 in the
+# factory (adr/0008-auto-merge-and-the-reader.md).
+#
+# WHY THIS EXISTS. Once a session in an admitted risk class lands with no person present,
+# `scripts/check.sh` cannot see the failures that matter most: a test that passes without
+# proving anything, a cited spec clause nothing realises, a floor set conveniently low. The
+# reader is put in front of auto-merge for exactly that reason. merge.yml does not merge until
+# this workflow's commit status says `success`.
+#
+# TWO VERDICTS, NEVER A MERGE:
+#   Spec       every clause the session block cites is realised in the diff AND asserted by
+#              a test that would fail without it
+#   Standards  this repo's CLAUDE.md laws: the RED to GREEN order visible in the commits, no
+#              floor lowered, nothing vendored edited, nothing out of the session's scope
+#
+# THE DEFINITION LIVES IN THE xal-factory PLUGIN, NOT HERE. `plugins/xal-factory/agents/
+# reader.md` in the process repo is language-agnostic and identical for every service, so it
+# is plugin-distributed, and this workflow reads it at a PINNED TAG (reader.ref in
+# .xal/factory.conf). A change to the reader reaches this repo's merge gate only through a
+# release that has been evaluated against the reader's committed failing fixture, never
+# through an edit on the process repo's main that nothing here has seen.
+#
+# THE AGENT NEVER HOLDS A CREDENTIAL THAT CAN WRITE. It reads files this workflow prepared and
+# writes one verdict file. The commit status and the PR comment are posted by later steps,
+# after the agent step has ended, and the verdict it wrote is judged by
+# scripts/driver/reader-verdict.sh: a crashed or confused reader posts `failure`, never
+# `success`.
+#
+# THE GENERIC REVIEW BOT STEPS ASIDE ON SESSION PRs (claude-code-review.yml). This reader is
+# its successor there, and its Standards axis covers what the bot covered. Every other pull
+# request keeps the bot.
+name: Reader
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# The driver opens the PR and pushes the plan-status commit seconds apart, and merge.yml's
+# update-branch pushes again. Only the LATEST head matters — a verdict for a sha that is no
+# longer the head is a verdict about something else — so a newer push cancels the read of an
+# older one rather than paying for both.
+concurrency:
+  group: reader-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  read:
+    name: Read the session PR (Spec, Standards)
+    # The cheap filter; the precise one (plan/<plan-id>/s<N>, not a plan amendment) is a step,
+    # for the reason chain.yml's own amendment guard gives.
+    if: startsWith(github.head_ref, 'plan/')
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    env:
+      PLAN: docs/plan/plan.md
+      READER_CONTEXT: factory/reader
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REF: ${{ github.head_ref }}
+      REPO: ${{ github.repository }}
+    steps:
+      # MAIN, NOT THE PULL REQUEST. Every script this job RUNS — the verdict parser above all —
+      # comes from main, because the head is written by the session being judged: a head that
+      # rewrote reader-verdict.sh to print `success` would otherwise approve its own merge. The
+      # head is checked out below as a separate worktree the reader READS and nothing EXECUTES.
+      # The plan comes from main for the same reason merge-decision.sh reads it from there.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Read the factory configuration
+        id: cfg
+        run: |
+          set -euo pipefail
+          ./scripts/driver/config.sh --emit | tee -a "$GITHUB_ENV"
+          {
+            printf 'reader_model=%s\n' "$(./scripts/driver/config.sh --get models.reader)"
+            printf 'reader_max_turns=%s\n' "$(./scripts/driver/config.sh --get budget.reader_max_turns)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Is this a session of the plan?
+        id: scope
+        run: |
+          set -euo pipefail
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          case "$HEAD_REF" in
+            ("plan/$plan_id/s"[0-9]*)
+              session="S${HEAD_REF##*/s}"
+              printf 'proceed=true\nsession=%s\nplan_id=%s\n' "$session" "$plan_id" >> "$GITHUB_OUTPUT"
+              printf '  %s is %s of %s — reading it\n' "$HEAD_REF" "$session" "$plan_id" ;;
+            (*)
+              printf 'proceed=false\n' >> "$GITHUB_OUTPUT"
+              printf '  %s is not a session branch of %s — nothing to read\n' "$HEAD_REF" "$plan_id" ;;
+          esac
+
+      # PENDING FIRST, so merge.yml sees "the reader is reading" rather than "no reader", and
+      # waits instead of stopping.
+      - name: Mark the head as being read
+        if: steps.scope.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=pending -f context="$READER_CONTEXT" \
+            -f description="The reader is reading this head" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+
+      # Everything the reader reads is prepared HERE, by the workflow, with the workflow's
+      # credentials: the admitted spec verified against the plan's digest (the driver's own
+      # fetch), the reader's definition at the pinned tag from the public process repo, the
+      # session block, the diff and the commit list. The agent gets files, not tokens. .reader/ is never committed: nothing in
+      # this workflow commits.
+      - name: Prepare what the reader reads
+        if: steps.scope.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_READ_TOKEN }}
+          SESSION: ${{ steps.scope.outputs.session }}
+        run: |
+          set -euo pipefail
+          mkdir -p .reader
+          ./scripts/driver/fetch-spec.sh --plan "$PLAN" --out .reader/spec.md
+          gh api "repos/$FACTORY_PROCESS_REPO/contents/plugins/xal-factory/agents/reader.md?ref=$FACTORY_READER_REF" \
+            --jq '.content' | base64 -d > .reader/definition.md
+          # The definition's frontmatter is for harnesses; the body is the instruction.
+          awk 'NR==1 && $0=="---" {fm=1; next} fm && $0=="---" {fm=0; next} !fm' \
+            .reader/definition.md > .reader/instructions.md
+          git fetch -q origin "+refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
+          # A self-hosted runner keeps its checkout between jobs, and actions/checkout's clean
+          # removes the directory but not the worktree registration under .git/worktrees, so
+          # a cancelled or failed read leaves ".reader/head is a missing but already registered
+          # worktree" for the next one. Prune first.
+          git worktree prune
+          rm -rf .reader/head
+          git worktree add -q --detach .reader/head "$HEAD_SHA"
+          base="$(git merge-base origin/main "$HEAD_SHA")"
+          git diff "$base" "$HEAD_SHA" > .reader/pr.diff
+          git log --reverse --format='%h %an: %s' "$base..$HEAD_SHA" > .reader/commits.txt
+          awk -v s="## Session ${SESSION}:" '$0 ~ "^"s {p=1; print; next} p && /^## / {exit} p' \
+            "$PLAN" > .reader/session.md
+          [ -s .reader/session.md ] || { printf '::error::no block for %s in the plan\n' "$SESSION"; exit 1; }
+          find .reader -maxdepth 1 -type f -exec wc -l {} +
+
+      - name: Compose the reader's brief
+        id: brief
+        if: steps.scope.outputs.proceed == 'true'
+        env:
+          SESSION: ${{ steps.scope.outputs.session }}
+        run: |
+          set -euo pipefail
+          {
+            cat .reader/instructions.md
+            printf '\n\n## This reading\n\n'
+            printf -- '- Repository: %s. The pull request head is checked out at `.reader/head/` — read the\n' "$REPO"
+            printf -- '  code there. Its standards are `CLAUDE.md` as it stands on main (the repository root),\n'
+            printf -- '  not the copy in the head, which the session could have edited.\n'
+            printf -- '- Session: %s. Its approved plan block, verbatim, from main: `.reader/session.md`.\n' "$SESSION"
+            printf -- '- The admitted spec it is built against, digest-verified: `.reader/spec.md`.\n'
+            printf -- '- The pull request diff against its merge base: `.reader/pr.diff`.\n'
+            printf -- '- Its commits, oldest first: `.reader/commits.txt`.\n'
+            printf -- '- Write the verdict to `.reader/verdict.json` and to nowhere else.\n'
+          } > "$RUNNER_TEMP/brief.md"
+          {
+            printf 'text<<XAL_READER_BRIEF_EOF\n'
+            cat "$RUNNER_TEMP/brief.md"
+            printf 'XAL_READER_BRIEF_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Read
+        id: agent
+        if: steps.scope.outputs.proceed == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.brief.outputs.text }}
+          claude_args: >-
+            --max-turns ${{ steps.cfg.outputs.reader_max_turns }}
+            --model ${{ steps.cfg.outputs.reader_model }}
+            --allowedTools "Read,Glob,Grep,Write,Bash(git log:*),Bash(git show:*),Bash(git diff:*)"
+            --disallowedTools "Edit,MultiEdit,WebFetch,WebSearch,Bash(git push:*),Bash(gh:*)"
+
+      # THE ONE-WAY RULE. reader-verdict.sh prints `success` only for a well-formed verdict that
+      # says PASS twice and names nothing; a missing or malformed file prints `failure`. So a
+      # reader that crashed, ran out of turns or wrote prose posts failure here, never success.
+      # Not `always()`: a run cancelled by a newer push must leave the old head alone.
+      - name: Post the verdict
+        if: steps.scope.outputs.proceed == 'true' && !cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          state="$(./scripts/driver/reader-verdict.sh --file .reader/verdict.json \
+                     --summary "$RUNNER_TEMP/summary.md")" || true
+          [ "$state" = success ] || state=failure
+          case "$state" in
+            (success) desc="Spec and Standards: no findings" ;;
+            (*)       desc="Findings or no usable verdict — a person reads this PR" ;;
+          esac
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state="$state" -f context="$READER_CONTEXT" \
+            -f description="$desc" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null
+          gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/summary.md" >/dev/null || true
+          printf '  %s at %s: %s\n' "$READER_CONTEXT" "${HEAD_SHA:0:7}" "$state"
+
+      # WHAT THE READ COST, against the session it read, so both ceilings see it. Recorded with
+      # `--kind reader`: it is spend, and it is NOT an attempt — spend.sh keeps it out of the
+      # retry counter. continue-on-error for the driver's reason: bookkeeping must not change a
+      # verdict, and a dropped line is annotated loudly as an undercount.
+      - name: Record what the read spent
+        if: steps.scope.outputs.proceed == 'true' && !cancelled()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          EXEC_FILE: ${{ steps.agent.outputs.execution_file }}
+          SESSION: ${{ steps.scope.outputs.session }}
+          PLAN_ID: ${{ steps.scope.outputs.plan_id }}
+        run: |
+          set -euo pipefail
+          cost=0; turns=0
+          if [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ]; then
+            read -r cost turns < <(jq -rs 'flatten | map(select(type == "object" and .type == "result")) | last
+                                           | "\(.total_cost_usd // 0) \(.num_turns // 0)"' "$EXEC_FILE" 2>/dev/null || echo "0 0")
+          else
+            printf '::warning title=Reader::no execution file — recording the read at $0, so the ledger UNDERCOUNTS\n'
+          fi
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          work="$RUNNER_TEMP/ledger-repo"
+          rm -rf "$work"
+          git clone -q --depth 1 --no-tags \
+            "https://x-access-token:${GH_TOKEN}@github.com/${FACTORY_OPS_REPO}.git" "$work"
+          mkdir -p "$(dirname "$work/$FACTORY_OPS_LEDGER_PATH")"
+          ./scripts/driver/spend.sh --file "$work/$FACTORY_OPS_LEDGER_PATH" --append --kind reader \
+            --plan-id "$PLAN_ID" --session "$SESSION" --attempt 0 --status read \
+            --cost "$cost" --turns "$turns" --run-url "$run_url"
+          cd "$work"
+          git config user.name  "claude[bot]"
+          git config user.email "41898282+claude[bot]@users.noreply.github.com"
+          git add "$FACTORY_OPS_LEDGER_PATH"
+          git commit -q -m "chore(costs): ${PLAN_ID} ${SESSION} reader — \$${cost}
+
+          Written by reader.yml from run ${run_url}. Spend, not an attempt (kind: reader)."
+          if ! git push -q origin HEAD 2>/dev/null; then
+            git pull -q --rebase origin HEAD && git push -q origin HEAD \
+              || printf '::warning title=Reader::the spend ledger could not be pushed; ceilings UNDERCOUNT by $%s\n' "$cost"
+          fi

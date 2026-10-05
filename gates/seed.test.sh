@@ -63,6 +63,8 @@ run clean                              0 'seed sets complete' 'a complete scaffo
 run rule-1-no-languages                1 'RULE 1' 'lang/ offers no language at all'
 run rule-2-missing-gate                1 'RULE 2' 'a language overlay ships no scripts/check.sh'
 run rule-3-ci-never-calls-the-gate     1 'RULE 3' 'the seeded ci.yml never invokes the gate script'
+run rule-5-no-driver-workflow          1 'RULE 5' 'common/ ships no driver.yml — the seeded repo would have no pipeline'
+run rule-5-driver-script-missing       1 'RULE 5' 'a scripts/driver/*.sh the pipeline names is not in common/ (the derived list)'
 run rule-4-seeder-defaults-a-language  1 'RULE 4' 'the seeder silently defaults --lang instead of refusing'
 
 printf '\n%s━━ discrimination: each fixture trips exactly one rule%s\n\n' "$BOLD" "$RST"

@@ -1,0 +1,57 @@
+# .github/actions/toolchain — the ONE place this repository resolves its toolchain and installs
+# the tooling its gate script needs. Every workflow that runs scripts/check.sh calls this
+# action, and the pipeline driver calls it TWICE: once before the agent runs, so the session
+# can run the gate itself, and once after, so the gate's verdict is about the tree the driver
+# will push.
+#
+# WHY IT IS AN ACTION AND NOT THREE STEPS PASTED INTO EACH WORKFLOW. The driver, the chain
+# and the merge workflows are language-agnostic and seeded from the scaffold's
+# common tree; the toolchain is the language overlay's. A composite action is the seam: the
+# driver says `uses: ./.github/actions/toolchain` and does not know what language it is
+# driving, and scripts/driver/step-order.sh asserts that this action runs between the agent
+# and the gate without knowing either. It also puts every version pin in one file rather than
+# in ci.yml, deploy.yml and the driver separately.
+#
+# WHY RE-RESOLVING AND REINSTALLING ARE ONE UNIT. setup-go keys off go.mod, and a session may
+# edit that file (one session did), and the gate went green in the driver
+# under the pre-agent toolchain while ci.yml, re-reading the edited file, failed govulncheck
+# with 22 advisories. `go install` writes binaries built by whichever toolchain was active,
+# so a re-resolve that leaves the old linter and scanner in place is the same defect one
+# layer down. Bundling them means neither can be re-run without the other.
+#
+# THE GATE-INPUT CONTRACT. .xal/gate-inputs declares the Go toolchain, golangci-lint and
+# govulncheck with this action's path as their caller pattern, so gate 0 asserts that every
+# workflow invoking scripts/check.sh calls this action. Change a pin here, in one place.
+name: Resolve the toolchain and install the gate's tooling
+description: >-
+  Sets up Go from go.mod's toolchain directive and installs the pinned golangci-lint and
+  govulncheck the gate script needs. Run it again after anything that may edit go.mod.
+
+runs:
+  using: composite
+  steps:
+    # The version comes from go.mod's `toolchain` directive, so the pin lives in the repo
+    # rather than here — one place to bump, and a local run uses the same toolchain CI does.
+    - name: Setup Go (pinned by go.mod)
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    # PINNED, never @latest: a linter that changes under you turns an unrelated PR red, and the
+    # person who has to explain it did not change any code.
+    - name: Install golangci-lint (lint gate input)
+      shell: bash
+      run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
+
+    # Pinned for the same reason; the vulnerability DATABASE is live, as it must be, but the
+    # tool reading it is not.
+    - name: Install govulncheck (audit gate input)
+      shell: bash
+      run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+    - name: Report which toolchain the gate will use
+      shell: bash
+      run: |
+        printf 'go directive:        %s\n' "$(awk '/^go /{print $2; exit}' go.mod)"
+        printf 'toolchain directive: %s\n' "$(awk '/^toolchain /{print $2; exit}' go.mod)"
+        printf 'resolved:            %s\n' "$(go env GOVERSION)"

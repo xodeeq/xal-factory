@@ -1,0 +1,1 @@
+{"standards":"FINDINGS","spec":"PASS","findings":[{"axis":"standards","ref":"CLAUDE.md strict TDD","where":"commits","what":"FX-FR-02 has no RED commit."}]}

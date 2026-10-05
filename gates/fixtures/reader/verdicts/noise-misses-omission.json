@@ -1,0 +1,1 @@
+{"standards":"FINDINGS","spec":"FINDINGS","findings":[{"axis":"spec","ref":"FX-FR-01","where":"slug_test.go","what":"Only one example; tabs are not covered."}]}

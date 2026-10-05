@@ -10,15 +10,22 @@ on:
     #   - "src/**/*.js"
     #   - "src/**/*.jsx"
 
+# A newer push to the same PR supersedes the run on the older head, so cancel it; the new head
+# gets its own full run, and that is the conclusion every merge condition reads.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # SESSION PULL REQUESTS ARE READ BY THE READER INSTEAD (reader.yml, pipeline S7). ADR-0009
+    # decision 10 named this bot as the reviewer an auto-merge must not race; on `plan/…` heads
+    # its successor is the two-axis reader, whose verdict merge.yml waits for and whose
+    # Standards axis covers what this bot covered. Running both would pay twice for one
+    # reading. Every other pull request — amendments, fixes, docs — keeps this bot.
+    if: ${{ !startsWith(github.head_ref, 'plan/') }}
 
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       pull-requests: read

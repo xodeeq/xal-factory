@@ -1,0 +1,1 @@
+{"standards":"FINDINGS","spec":"FINDINGS","findings":[{"axis":"spec","ref":"FX-FR-02","where":"slug.go","what":"Nothing refuses a name over 64 characters, and no test asserts it."},{"axis":"standards","ref":"CLAUDE.md strict TDD","where":"commits","what":"b2c3d4e claims FX-FR-02 GREEN with no RED commit before it."}]}

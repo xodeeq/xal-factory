@@ -1,0 +1,5 @@
+name: Reader
+jobs:
+  read:
+    steps:
+      - run: ./scripts/driver/reader-verdict.sh

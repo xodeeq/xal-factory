@@ -1,0 +1,24 @@
+# The smallest merge workflow that holds every merge-check rule. Every other fixture here is
+# this file broken in exactly one place, so a failure names a rule rather than a file.
+name: Merge
+on:
+  workflow_run:
+    workflows: ["Driver"]
+    types: [completed]
+concurrency:
+  group: merge-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  land:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Judge the head, then merge
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+          ci=""
+          ci="$(gh api "repos/r/commits/$sha/check-runs" --jq '.x')"
+          reader="$(gh api "repos/r/commits/$sha/statuses" --jq '.x')"
+          decision="$(./scripts/driver/merge-decision.sh --ci "$ci" --reader "$reader")"
+          [ "$decision" = merge ] && gh pr merge "$PR" --merge --match-head-commit "$sha"

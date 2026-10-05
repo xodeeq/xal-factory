@@ -1,0 +1,55 @@
+diff --git a/head/slug.go b/head/slug.go
+new file mode 100644
+index 0000000..6ff70b1
+--- /dev/null
++++ b/head/slug.go
+@@ -0,0 +1,17 @@
++package slug
++
++import (
++	"errors"
++	"strings"
++)
++
++// ErrTooLong is FX-FR-02's refusal.
++var ErrTooLong = errors.New("slug: name longer than 64 characters")
++
++// Slug is FX-FR-01: lowercase, each run of spaces one hyphen. FX-FR-02: over 64 is refused.
++func Slug(name string) (string, error) {
++	if len(name) > 64 {
++		return "", ErrTooLong
++	}
++	return strings.Join(strings.Fields(strings.ToLower(name)), "-"), nil
++}
+diff --git a/head/slug_test.go b/head/slug_test.go
+new file mode 100644
+index 0000000..763f8d4
+--- /dev/null
++++ b/head/slug_test.go
+@@ -0,0 +1,26 @@
++package slug
++
++import (
++	"errors"
++	"strings"
++	"testing"
++)
++
++// FX-FR-01
++func TestSlugLowercasesAndHyphenates(t *testing.T) {
++	got, err := Slug("Acme  Corp")
++	if err != nil || got != "acme-corp" {
++		t.Fatalf(`Slug("Acme  Corp") = %q, %v; want "acme-corp", nil`, got, err)
++	}
++}
++
++// FX-FR-02: 65 is refused with no slug, and 64 — the boundary — is accepted.
++func TestSlugRefusesOver64(t *testing.T) {
++	got, err := Slug(strings.Repeat("a", 65))
++	if !errors.Is(err, ErrTooLong) || got != "" {
++		t.Fatalf("65 chars: got %q, %v; want \"\", ErrTooLong", got, err)
++	}
++	if _, err := Slug(strings.Repeat("a", 64)); err != nil {
++		t.Fatalf("64 chars: got %v; want accepted", err)
++	}
++}
