@@ -158,6 +158,33 @@ The test to apply to a rule that has never been exercised is not "has this been 
 "**could** it be, by the people and mechanisms that actually exist?" A rule nothing can
 satisfy is not a discipline that slipped; deleting it is the honest fix.
 
+## 9. A repo that runs a pipeline gates the pipeline too
+
+A repo whose sessions are built by an agent (the implementation stage in
+[`lifecycle.md`](lifecycle.md)) carries four more obligations, because the agent is the one
+contributor who will take any path the gate leaves open.
+
+- **The pipeline's scripts have fixtures, and they run as a gate.** The driver, the chain,
+  the merge decision and the reader's verdict parser are scripts like any other. Each rule
+  they enforce ships a committed failing fixture, and a gate in the repo's own gate script
+  runs them, so a change that quietly weakens a refusal is red.
+- **Gate paths are protected.** A session may not change the gate script, the fixtures, the
+  workflows, the declared inputs or the overlay's tool configuration unless its plan lists
+  that path among its artifacts. The protected set is declared as data in
+  `.xal/protected-paths`, beside the inputs, and the merge decision reads it. CI runs the
+  head's own gate, so a session that weakened its gate would otherwise be judged by the gate
+  it weakened.
+- **The gate is run, never reported.** The workflow runs the gate after the agent has
+  finished and records the result. An agent's claim that the gate passed is not evidence.
+- **The driver and CI resolve the same toolchain.** The driver's gate and CI's gate judge the
+  same commit, so they install tools through one shared step. Two copies of a toolchain
+  setup drift, and a session that is green in one and red in the other is a disagreement
+  nobody can act on.
+
+A scaffold that seeds such repos carries the whole pipeline in its common tree, and its own
+seed-set check fails when a piece is missing, so no new repo arrives with a driver that has
+no fixtures or a merge workflow that has no decision script.
+
 ## Checklist (a gate script is trustworthy when…)
 
 - [ ] It is one script, in the gate order above, and CI invokes it verbatim.
@@ -170,3 +197,5 @@ satisfy is not a discipline that slipped; deleting it is the honest fix.
 - [ ] No gate modifies the working tree.
 - [ ] Coverage floors are recorded from measurement and the floors file is a closed world.
 - [ ] Every script, fixture and field in the repo has a caller you can name.
+- [ ] Where an agent builds sessions: the pipeline's fixtures run as a gate, gate paths are
+      declared in `.xal/protected-paths`, and the driver and CI share one toolchain step.

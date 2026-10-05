@@ -2,6 +2,8 @@
 # Paths are relative to this repo's spec/ dir. Lines starting with # and blank lines
 # are ignored. Keep this list in sync with spec/README.md.
 README.md
+lifecycle.md
+session-types.md
 process-guide.md
 service-conventions.md
 deployment-conventions.md
