@@ -50,7 +50,7 @@
 # loudly, never silently.
 #
 # Usage:  scripts/check.sh        (from anywhere; it cd's to the repo root)
-# Env:    XAL_PROCESS_DIR        path to the process repo checkout (default ../xal-engineering-process)
+# Env:    XAL_PROCESS_DIR        path to the process repo checkout (default ../xal-factory)
 #         CI=true                 makes the Docker and drift gates mandatory
 # Deps:   bash, go, gofmt, golangci-lint, govulncheck, docker — all declared in
 #         .xal/gate-inputs, which is what gate 0 exists to keep honest.
@@ -64,7 +64,7 @@ cd "$ROOT"
 # Where the process repo is checked out. Overridable so the sibling-clone layout used
 # locally and the in-workspace path used by CI can differ; never hardcoded. A relative value
 # resolves against $ROOT, which we have already cd'd to.
-XAL_PROCESS_DIR="${XAL_PROCESS_DIR:-../xal-engineering-process}"
+XAL_PROCESS_DIR="${XAL_PROCESS_DIR:-../xal-factory}"
 
 COV_DIR="$ROOT/.coverage"
 COV_PROFILE="$COV_DIR/cover.out"
@@ -354,7 +354,7 @@ process_drift_step() {
     if [ "${CI:-}" = "true" ]; then
       printf '%sThe process repo is required in CI but %s is missing or not executable.%s\n' \
         "$RED" "$sync_script" "$RST"
-      printf '%sCheck out xodeeq/xal-engineering-process and point XAL_PROCESS_DIR at it.%s\n' "$RED" "$RST"
+      printf '%sCheck out xodeeq/xal-factory and point XAL_PROCESS_DIR at it.%s\n' "$RED" "$RST"
       return 1
     fi
     printf '%s⚠ No process repo at %s — SKIPPING the spec-drift check (mandatory in CI).%s\n' \

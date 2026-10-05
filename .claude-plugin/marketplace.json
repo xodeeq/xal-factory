@@ -1,16 +1,16 @@
 {
-  "name": "xal-engineering-process",
+  "name": "xal-factory",
   "owner": {
     "name": "xodeeq",
-    "url": "https://github.com/xodeeq/xal-engineering-process"
+    "url": "https://github.com/xodeeq/xal-factory"
   },
-  "description": "The Xal Engineering Process for Claude Code: the session ritual, the concept-note discipline and the service conventions, distributed to every repo that follows the process.",
+  "description": "The Xal Software Factory for Claude Code: the session ritual, the spec-to-plan-to-merge pipeline agents and the service conventions, distributed to every repo the factory seeds.",
   "plugins": [
     {
-      "name": "xal-process",
+      "name": "xal-factory",
       "description": "/begin-session and /wrap-session, the concept-note skill, and the service-conventions skill that points at a repo's vendored docs/process/.",
       "category": "engineering",
-      "source": "./plugins/xal-process"
+      "source": "./plugins/xal-factory"
     }
   ]
 }

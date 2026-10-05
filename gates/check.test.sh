@@ -100,6 +100,8 @@ run gate-1-language-leak      1 'CHECK FAILED at: language-agnostic spec' \
     'a language-specific token stated as a rule, outside any citation'
 run gate-1-informative-only   1 'CHECK FAILED at: language-agnostic spec' \
     'every manifest file marked informative — an empty scan must not be green'
+run gate-8-product-term      1 'CHECK FAILED at: nothing of the source product' \
+    'a lifted script keeps the source product escalation label'
 run gate-2-escaping-link      1 'CHECK FAILED at: links resolve' \
     'a vendored file links to ../VERSION — the original bug, reintroduced'
 run gate-2-dangling-link      1 'CHECK FAILED at: links resolve' \

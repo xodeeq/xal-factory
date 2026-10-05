@@ -1,6 +1,6 @@
 # CLAUDE.md — <SERVICE> (living source of truth)
 
-> **Seeded from the Xal Engineering Process scaffold.** The seeder filled the service's name
+> **Seeded from the Xal Software Factory scaffold.** The seeder filled the service's name
 > and the sections that are true of every repo under the process. **Every remaining `<…>`
 > placeholder is a section this service has not decided yet** — they are not decoration,
 > and a session that needs one answers it deliberately (usually in an ADR) rather than

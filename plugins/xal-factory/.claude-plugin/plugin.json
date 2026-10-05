@@ -1,0 +1,12 @@
+{
+  "name": "xal-factory",
+  "version": "0.1.0",
+  "description": "The Xal Software Factory: the begin/wrap session ritual, the concept-note discipline and the service conventions. Install in any repo that vendors the process spec into docs/process/.",
+  "author": {
+    "name": "xodeeq",
+    "url": "https://github.com/xodeeq/xal-factory"
+  },
+  "homepage": "https://github.com/xodeeq/xal-factory/tree/main/plugins/xal-factory",
+  "repository": "https://github.com/xodeeq/xal-factory",
+  "keywords": ["xal", "software-factory", "session-ritual", "conventions", "gates"]
+}

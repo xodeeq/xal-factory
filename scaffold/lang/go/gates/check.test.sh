@@ -59,7 +59,7 @@ else BOLD=""; RED=""; GREEN=""; YEL=""; RST=""; fi
 # Resolve the process-repo checkout to an absolute path, once. Missing is fatal under CI=true for
 # the same reason it is fatal in check.sh: a gate that cannot run has not passed.
 PLATFORM_ABS=""
-_pd="${XAL_PROCESS_DIR:-../xal-engineering-process}"
+_pd="${XAL_PROCESS_DIR:-../xal-factory}"
 if [ -d "$_pd" ]; then
   PLATFORM_ABS="$(cd "$_pd" && pwd)"
 elif [ "${CI:-}" = "true" ]; then

@@ -177,7 +177,7 @@ note "pinned $(cat "$PROCESS/VERSION")"
 step "writing .xal/seed.config"
 cat > "$DEST/.xal/seed.config" <<EOF
 # .xal/seed.config — how this repo was created. Written once, by
-# xal-engineering-process/scaffold/seed-service.sh; see that repo's adr/0002-repo-seeding.md.
+# xal-factory/scaffold/seed-service.sh; see that repo's adr/0002-repo-seeding.md.
 #
 # SEED_LANG is not a preference and not a default. It is the language this service's first
 # ADR chose, on this service's workload. SEED_ADR is where that decision is recorded, so
@@ -202,9 +202,9 @@ step "git init + first commit"
   cd "$DEST" || exit 1
   git init -q -b main || exit 1
   git add -A || exit 1
-  git -c commit.gpgsign=false commit -q -m "chore: seed $NAME from the xal-engineering-process scaffold ($LANG_ID)
+  git -c commit.gpgsign=false commit -q -m "chore: seed $NAME from the xal-factory scaffold ($LANG_ID)
 
-Seeded by xal-engineering-process/scaffold/seed-service.sh per its ADR-0002.
+Seeded by xal-factory/scaffold/seed-service.sh per its ADR-0002.
 Language $LANG_ID, chosen in $ADR. Process spec pinned at $(cat "$PROCESS/VERSION").
 
 The repo arrives with its gate: scripts/check.sh in the process's gate order,

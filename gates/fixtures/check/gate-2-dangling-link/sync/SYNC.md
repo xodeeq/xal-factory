@@ -43,10 +43,10 @@ process/spec/*.md   ──(seed-service.sh + process-sync.sh)──►   <repo>/
 # From the CONSUMING repo's root directory:
 
 # vendor / update the spec (then review & commit the docs/process/ diff in your PR):
-/path/to/xal-engineering-process/sync/process-sync.sh /path/to/xal-engineering-process
+/path/to/xal-factory/sync/process-sync.sh /path/to/xal-factory
 
 # CI / gate — fail if this repo is behind the process spec:
-/path/to/xal-engineering-process/sync/process-sync.sh /path/to/xal-engineering-process --check
+/path/to/xal-factory/sync/process-sync.sh /path/to/xal-factory --check
 ```
 
 A freshly seeded repo already has `docs/process/` populated and `sync.config` written. A
@@ -73,7 +73,7 @@ Therefore, in any file listed in [`manifest`](manifest):
   sibling (`service-conventions.md`) — the whole set lands in one flat directory.
 - **Not allowed:** any relative link outside that set — `../VERSION`, `../sync/SYNC.md`,
   `../adr/0001-….md`. Use an absolute
-  `https://github.com/xodeeq/xal-engineering-process/blob/main/…` URL, or don't make it a link.
+  `https://github.com/xodeeq/xal-factory/blob/main/…` URL, or don't make it a link.
 - **Move the link text too.** These links commonly use the path as their label; retargeting
   the URL alone leaves a label displaying a path that is wrong in a consumer.
 

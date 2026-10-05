@@ -1,4 +1,4 @@
-# CLAUDE.md — the Xal Engineering Process repo (living source of truth)
+# CLAUDE.md — the Xal Software Factory repo (living source of truth)
 
 This file is the durable context for working **in the process repo itself**. For a
 *consuming* repo's context, see that repo's own `CLAUDE.md`, seeded from
@@ -37,7 +37,7 @@ language's terms, it is not a process rule yet — it belongs in that repo.
 | the spec: lifecycle guide, service and deployment conventions, gate discipline, ADR + concept + session discipline | **`spec/`** | the forward source of truth; vendored read-only into consumers' `docs/process/` |
 | the gate-input checker | **`.xal/check-gate-inputs.sh`** | copied into every seeded repo by the seeder; change it here and re-copy, never edit a seeded copy |
 | a seeded repo's gate script, CI, fixtures | **that repo** | a starting point it owns ([ADR-0002](adr/0002-repo-seeding.md)); not synced |
-| the session ritual commands and skills | **`plugins/xal-process/`** | distributed as a plugin ([ADR-0003](adr/0003-claude-config-boundary.md)); a repo's `.claude/` holds only what is true of that repo |
+| the session ritual commands and skills | **`plugins/xal-factory/`** | distributed as a plugin ([ADR-0003](adr/0003-claude-config-boundary.md)); a repo's `.claude/` holds only what is true of that repo |
 
 ## Versioning the spec
 

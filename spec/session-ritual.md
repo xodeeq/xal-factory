@@ -6,7 +6,7 @@ concern**, and every session opens and closes with a fixed ritual so the next se
 ceremony.
 
 The ritual is realized as two agent commands — **`/begin-session`** and **`/wrap-session`**
-(distributed by the `xal-process` plugin; optional, the ritual is followable by hand) — plus
+(distributed by the `xal-factory` plugin; optional, the ritual is followable by hand) — plus
 three durable artifacts:
 `docs/sessions/NN.md` (handoffs), `docs/briefs/` (ephemeral forward briefs), and the
 repo's `docs/lessons.md` (continuous-improvement log). The scaffold seeds all of them.

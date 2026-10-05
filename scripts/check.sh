@@ -270,7 +270,7 @@ links_resolve_step() {
   if [ "$fail" -ne 0 ]; then
     printf '\n%s::error::a link is broken, or a vendored file links outside the vendored set%s\n' "$RED" "$RST"
     printf '  A manifest file is copied verbatim into a consumer, where ../ means that\n'
-    printf '  repo'"'"'s docs/. Use an absolute https://github.com/xodeeq/xal-engineering-process/...\n'
+    printf '  repo'"'"'s docs/. Use an absolute https://github.com/xodeeq/xal-factory/...\n'
     printf '  URL instead. See sync/SYNC.md "What'"'"'s in scope to sync".\n'
     return 1
   fi
@@ -440,10 +440,49 @@ gate_inputs_step() {
 seed_fixtures_step() { bash gates/seed.test.sh; }
 seed_set_step()      { bash scripts/check-seed-set.sh; }
 
+# --- gate 8: nothing of the source product ships ------------------------------------
+# This repo is lifted by hand from a private estate, and every lifted file is a chance to
+# carry a unit name, a person or a private credential name along with it. Each reads fine to
+# whoever wrote it, because it is true at home, and is wrong in every adopter's repo.
+# .xal/strip-terms is the closed list; this gate matches it, case-insensitively and as whole
+# words, against every tracked file.
+#
+# Exempt, and printed whenever they apply: the term list itself, the fixture trees (broken on
+# purpose), the lift ledger (whose job is to name each file's source) and handoffs written
+# before the gate existed. The exemptions live here and nowhere else.
+STRIP_EXEMPT='^(\.xal/strip-terms|gates/fixtures/.*|docs/lift-ledger\.md|docs/sessions/01\.md)$'
+
+strip_step() {
+  local terms re hits n=0
+  [ -f .xal/strip-terms ] || { printf '%s  .xal/strip-terms is missing%s\n' "$RED" "$RST"; return 1; }
+  terms="$(sed 's/#.*//' .xal/strip-terms | tr -d '[:blank:]' | grep -v '^$')"
+  [ -n "$terms" ] || { printf '%s  .xal/strip-terms names no term, refusing to report green over nothing%s\n' "$RED" "$RST"; return 1; }
+  re="\\b($(printf '%s\n' "$terms" | paste -sd'|' -))\\b"
+  # Tracked and not-yet-tracked files alike, so a fresh lift is caught before its commit.
+  # Outside a git work tree (the fixture harness copies the repo without .git), every file.
+  hits="$(
+    { git ls-files -co --exclude-standard 2>/dev/null || find . -type f -not -path './.git/*' | sed 's|^\./||'; } \
+      | grep -vE "$STRIP_EXEMPT" \
+      | while IFS= read -r f; do [ -f "$f" ] && grep -IniE -- "$re" "$f" /dev/null; done
+  )"
+  if [ -n "$hits" ]; then
+    printf '%s  PRODUCT TERM IN A SHIPPED FILE:%s\n' "$RED" "$RST"
+    printf '%s\n' "$hits" | cut -c1-140 | sed 's/^/    /'
+    printf '\n%s::error::a term from .xal/strip-terms ships in this repo%s\n' "$RED" "$RST"
+    printf '  Fix: generalize it (a config key, a placeholder, a neutral name) and record the\n'
+    printf '  change in docs/lift-ledger.md.\n'
+    return 1
+  fi
+  n="$(printf '%s\n' "$terms" | wc -l | tr -d ' ')"
+  printf '  no product term ships (%s pattern(s); exempt: %s)\n' "$n" "$(printf '%s' "$STRIP_EXEMPT" | tr -d '^$\\()')"
+  return 0
+}
+
 # --- run the gates -------------------------------------------------------------
 gate "gate inputs declared + every caller wired"            gate_inputs_step
 gate "plugin manifests (claude plugin validate --strict)"   plugin_manifests_step
 gate "language-agnostic spec (no language-specifics as rules)" spec_language_agnostic_step
+gate "nothing of the source product ships (strip terms)"    strip_step
 gate "links resolve (+ vendored-set rule)"                  links_resolve_step
 gate "scaffold self-consistency"                            scaffold_consistency_step
 gate "seed-set fixtures (proven able to fail)"              seed_fixtures_step
