@@ -6,9 +6,10 @@ This file is the durable context for working **in the process repo itself**. For
 
 ## What this repo is
 
-The canonical home of a **language-agnostic** engineering process: the spec repos vendor,
-the scaffold that seeds a new repo with a working gate, the sync mechanism, and the plugin
-that carries the session ritual to Claude Code. The governing rule
+The canonical home of a **language-agnostic** software factory: the spec repos vendor, the
+lifecycle from a one-line idea to a monitored service, the scaffolds that seed a service repo
+(with its gate and its pipeline) and the factory's ops repo, the sync mechanism, and the
+plugin that carries the session ritual and the reader to Claude Code. The governing rule
 ([ADR-0001](adr/0001-process-repo-and-sync-model.md)): **this repo owns the SPEC; each
 consuming repo owns its language's IMPLEMENTATION.** See [README.md](README.md) and
 [PRINCIPLES.md](PRINCIPLES.md).
@@ -37,7 +38,11 @@ language's terms, it is not a process rule yet — it belongs in that repo.
 | the spec: lifecycle guide, service and deployment conventions, gate discipline, ADR + concept + session discipline | **`spec/`** | the forward source of truth; vendored read-only into consumers' `docs/process/` |
 | the gate-input checker | **`.xal/check-gate-inputs.sh`** | copied into every seeded repo by the seeder; change it here and re-copy, never edit a seeded copy |
 | a seeded repo's gate script, CI, fixtures | **that repo** | a starting point it owns ([ADR-0002](adr/0002-repo-seeding.md)); not synced |
-| the session ritual commands and skills | **`plugins/xal-factory/`** | distributed as a plugin ([ADR-0003](adr/0003-claude-config-boundary.md)); a repo's `.claude/` holds only what is true of that repo |
+| the session ritual commands, skills and the reader agent | **`plugins/xal-factory/`** | distributed as a plugin ([ADR-0003](adr/0003-claude-config-boundary.md)); a repo's `.claude/` holds only what is true of that repo. The reader is pinned by release tag `xal-factory--v<VERSION>`, cut only after `reader-eval.yml` is green |
+| the pipeline: driver, chain, merge, reader workflows and `scripts/driver/` | **`scaffold/common/`** | seeded into every service ([ADR-0007](adr/0007-pipeline-driver.md), [ADR-0008](adr/0008-auto-merge-and-the-reader.md)); proven here by seeding a repo and running `gates/driver.test.sh` |
+| the factory configuration keys and their defaults | **`scaffold/common/scripts/driver/config.sh`** | a seeded repo sets only what differs, in `.xal/factory.conf` |
+| the ops repo: spec intake, the plan critic, status, the nudge, the agents | **`scaffold/ops/`** | seeded once per factory by `scaffold/seed-ops.sh`; gate 10 seeds one and runs its gate on every build |
+| what was lifted from the source estate, and when | **`docs/lift-ledger.md`** | one row per lifted file; the input to the next lift |
 
 ## Versioning the spec
 
@@ -75,6 +80,15 @@ deliberately. Changes to `scaffold/`, `plugins/`, `scripts/` or `adr/` do not bu
 - **Conventional Commits; small logical commits.** Decisions explained in commit bodies or
   ADRs.
 
+## Lifting from the source estate
+
+The factory is lifted by hand from a private estate where each rule was proven first. A lift
+is a PR that adds a row per file to `docs/lift-ledger.md` (source, commit, what was stripped,
+what was parameterized), reads the source at its `origin/main`, never a local branch, and
+keeps the strip gate (gate 8, `.xal/strip-terms`) green. A term the gate does not know yet
+and should is added to `.xal/strip-terms` in the same PR. Something the source has that the
+factory does not take goes in the ledger's Deferred table with its trigger.
+
 ## Adding a language overlay
 
 One PR adding `scaffold/lang/<name>/` with the full artifact set that
@@ -89,6 +103,12 @@ the one gate whose arithmetic is hand-written (coverage), and a clean one. Model
 
 - **A second language overlay.** Go is the only one; the split between `common/` and
   `lang/` has been exercised once, by the language it was designed against.
+- **The pipeline has not run live from this repo.** It is proven by fixtures here and by 145
+  driver fixtures in a seeded repo, and it ran live for weeks in the source estate. The live
+  proof from a factory-seeded repo (one in-class session merges, one out-of-class session
+  stops) is owed, and recorded in the next session handoff when done.
+- **Telemetry reference implementation.** The Go overlay ships a stub binary, not the
+  source's telemetry and HTTP packages (lift ledger, Deferred).
 - **Observability IaC modules in the scaffold.** `deployment-conventions.md` Pattern B
   describes reusable modules; none ship yet. Trigger: a seeded service needs deployable
   observability.
