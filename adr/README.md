@@ -18,6 +18,7 @@ the process's own machinery.
 | [0006](0006-problem-document-convention.md) | One problem-document convention: a URN `type`, snake_case codes, a shared vocabulary, `validation_failed` for every 400 | Accepted |
 | [0007](0007-pipeline-driver.md) | The pipeline driver and chain: one session headless in the service repo, judged by the gate the workflow runs, retried within a cap, bounded by two ceilings | Proposed |
 | [0008](0008-auto-merge-and-the-reader.md) | Auto-merge: one decision script, autonomy granted by risk class, and the reader reads every session before it can land | Proposed |
+| [0009](0009-configuration.md) | Every option in one registry, set in a reviewed `.xal/factory.conf`, with a default; switches act on the forge through the CLI | Proposed |
 
 > **Provenance.** These decisions were made and proven in the author's private repositories
 > before this repo existed, and are re-recorded here with the product-specific context

@@ -44,36 +44,39 @@ default.
 | [`sync/`](sync/) | How a repo vendors the spec, and how drift becomes a red gate instead of a silent divergence. |
 | [`adr/`](adr/) | The factory's decisions: sync, seeding, the plugin boundary, declared inputs, the plan format, the problem document, the driver, auto-merge. |
 | [`docs/lift-ledger.md`](docs/lift-ledger.md) | Where every lifted file came from, and what was stripped on the way. |
+| [`install.sh`](install.sh), [`bin/xal-factory`](bin/xal-factory), [`factory/options.tsv`](factory/options.tsv) | The installer, the command line (`init`, `seed`, `config`, `enable`, `disable`, `apply`, `doctor`), and the one registry of every option with its default. |
 | [`scripts/check.sh`](scripts/check.sh) | This repo's own gate. CI runs this exact script, and [`gates/check.test.sh`](gates/check.test.sh) proves each of its gates can fail. |
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/xodeeq/xal-factory.git
-
-# once per factory: the ops repo (specs, status, cost ledger, idea inbox, agents)
-xal-factory/scaffold/seed-ops.sh --name acme --dest ./acme-ops
-
-# per service: a repo that arrives with its gate and its pipeline
-xal-factory/scaffold/seed-service.sh \
-    --name orders --lang go --module github.com/you/orders \
-    --ops-repo you/acme-ops --dest ./orders
-cd orders && ./scripts/check.sh
+curl -fsSL https://factory.getxal.com/install.sh | bash
 ```
 
-Both seeders print what remains a person's to do (installing the agent's app, setting
-secrets with their expiry dates) and stop. The service seeder refuses to pick a language:
-stack selection is a decision recorded as the new repo's first ADR.
-
-**Configure a seeded repo** in `.xal/factory.conf`; `scripts/driver/config.sh --list` shows
-every key, its value and whether it is the default.
-
-**Use the plugin** in any repo (a seeded repo has it already):
+The installer checks your tools, puts the factory at `~/.local/share/xal-factory`, links the
+`xal-factory` command, offers the Claude Code plugin, and then offers the onboarding:
 
 ```bash
-claude plugin marketplace add xodeeq/xal-factory
-claude plugin install xal-factory@xal-factory
+xal-factory init          # every question shows its default and how to change it later
+xal-factory seed orders   # a service repo with its gate and its pipeline, from your profile
+xal-factory doctor        # tools, credentials, configuration, and GitHub against the conf
 ```
+
+`xal-factory init --yes` takes every default without asking. Every option, what it does and
+how to change it: `xal-factory config explain`, or [`factory/options.tsv`](factory/options.tsv).
+
+**Without the installer**, the seeders work on their own from a clone:
+
+```bash
+git clone https://github.com/xodeeq/xal-factory.git
+xal-factory/scaffold/seed-ops.sh --name acme --dest ./acme-ops
+xal-factory/scaffold/seed-service.sh --name orders --lang go \
+    --module github.com/you/orders --ops-repo you/acme-ops --dest ./orders
+```
+
+Both print what remains a person's to do (installing the agent's app, setting secrets with
+their expiry dates) and stop. Neither picks a language for you: the stack is a service's
+first ADR, and `stack.default_lang` only pre-selects one.
 
 **Adopt in an existing repo**: [`docs/adopting.md`](docs/adopting.md).
 

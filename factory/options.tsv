@@ -1,0 +1,44 @@
+# factory/options.tsv: every option the factory has, in one place.
+#
+# This file drives four things, so it cannot drift from any of them: the onboarding prompts
+# (`xal-factory init`), `xal-factory config explain`, the defaults file every seeded repo
+# reads (.xal/factory.defaults, written by the seeders), and the options page of the docs.
+# Gate 11 (scripts/check-options.sh) asserts every key is well-formed, every default is one
+# of its choices, every key a script reads is listed here, and every key here has a reader.
+#
+# Columns, tab-separated:
+#   key       dotted name, as written in .xal/factory.conf
+#   default   the value when nothing sets it; `required` only where no default can exist
+#   choices   `a|b|c` for a closed set, `*` for free text, `int` for a positive integer
+#   scope     service (each service repo's conf) or ops (the ops repo's conf, the factory
+#             profile; service-scope keys set there become the default for every new service)
+#   apply     how a value takes effect: conf (read from the file), workflow:<file> (on/off
+#             enables or disables that workflow), var:<NAME> (a repository variable)
+#   ask       yes = `init` asks it; no = it has a sensible default and is changed later
+#   what      one line: what it does
+#   later     how to change it after setup
+key	default	choices	scope	apply	ask	what	later
+factory.ops_repo	required	*	service	conf	yes	The owner/name of the ops repo: admitted specs, the spend ledger, the idea inbox. No script can guess it.	xal-factory config set factory.ops_repo <owner>/<name>
+factory.process_repo	xodeeq/xal-factory	*	service	conf	no	The factory repo services vendor the spec from and the reader is pinned in. Change it only if you run a fork.	xal-factory config set factory.process_repo <owner>/<name>
+factory.escalation_label	needs-human	*	service	conf	yes	The label a stopped pull request gets when the pipeline hands it to a person.	xal-factory config set factory.escalation_label <label>
+stack.default_lang	go	go	ops	conf	yes	The language `xal-factory seed` pre-selects. The service's stack ADR is still required: this is a fallback, not a decision.	xal-factory config set stack.default_lang <lang>
+models.driver	claude-opus-5-5	*	service	conf	yes	The model that builds plan sessions. The strongest is the default because the gate cannot see a test that proves nothing.	xal-factory config set models.driver <model-id>
+models.reader	claude-opus-5-5	*	service	conf	no	The model that reads every session PR on Spec and Standards before it can merge.	xal-factory config set models.reader <model-id>
+budget.driver_max_turns	200	int	service	conf	no	Turn cap per driver run: a loop guard, not a budget.	xal-factory config set budget.driver_max_turns <n>
+budget.reader_max_turns	80	int	service	conf	no	Turn cap per reader run.	xal-factory config set budget.reader_max_turns <n>
+plan.spend_ceiling_usd	600	int	service	conf	yes	Dollar ceiling per plan, checked against the ledger before every session. Spend is bounded to ceiling + one session.	xal-factory config set plan.spend_ceiling_usd <n> (applies to plans emitted after)
+plan.session_ceiling_usd	70	int	service	conf	yes	Dollar ceiling per session across its retries.	xal-factory config set plan.session_ceiling_usd <n> (applies to plans emitted after)
+plan.retry_cap	2	int	service	conf	no	Retries per session before it is escalated to a person.	xal-factory config set plan.retry_cap <n> (applies to plans emitted after)
+reader.ref	xal-factory--v<VERSION>	*	service	conf	no	The plugin release the reader is read from. Pinned, so an unreleased edit never changes the merge gate.	xal-factory config set reader.ref xal-factory--v<version>
+ops.ledger_path	status/costs.jsonl	*	service	conf	no	Where in the ops repo the spend ledger lives.	xal-factory config set ops.ledger_path <path>
+pipeline.driver	on	on|off	service	workflow:driver.yml	yes	The driver: builds one plan session headless when dispatched (/run-session). Off means sessions are built by hand.	xal-factory enable driver / xal-factory disable driver
+pipeline.chain	off	on|off	service	workflow:chain.yml	yes	The chain: after a session merges, dispatches the next; retries a failure, then escalates. Off means every session is dispatched by a person.	xal-factory enable chain / xal-factory disable chain
+pipeline.auto_merge	off	off|code-only|code-and-tests-pre-deployment	service	workflow:merge.yml	yes	What may merge with no person present. off disables merge.yml; the others set the plan's autonomy_level. infra, billing, public-surface and delete never merge unattended.	xal-factory config set pipeline.auto_merge <level> (a plan's own autonomy_level is the owner's approval)
+pipeline.reader	on	on|off	service	workflow:reader.yml	no	The reader on every session PR. Auto-merge requires it.	xal-factory enable reader / xal-factory disable reader
+claude.mention_workflow	on	on|off	service	workflow:claude.yml	no	@claude in issues and PRs.	xal-factory enable mention / xal-factory disable mention
+claude.pr_review	on	on|off	service	workflow:claude-code-review.yml	no	The generic review bot on non-session PRs.	xal-factory enable review / xal-factory disable review
+ci.runner	ubuntu-latest	ubuntu-latest|self-hosted	service	var:XAL_RUNNER	no	Where every workflow runs. self-hosted needs a registered runner; unset means hosted minutes.	xal-factory config set ci.runner self-hosted
+deploy.target	none	none|fly	service	conf	no	Where deploy.yml deploys. none refuses loudly. Turning one on is a person's act (docs/deploy.md).	xal-factory config set deploy.target fly
+deploy.url	none	*	service	conf	no	The live base URL the smoke gate drives after a deploy.	xal-factory config set deploy.url https://<host>
+ops.status_nudge	on	on|off	ops	workflow:nudge.yml	yes	The weekday nudge: status/current.md rendered into a pinned issue.	xal-factory enable nudge / xal-factory disable nudge
+ops.idea_inbox	on	on|off	ops	conf	yes	The idea inbox: an open issue labelled `ideas` that /idea posts to.	xal-factory config set ops.idea_inbox on|off

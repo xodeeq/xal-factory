@@ -27,7 +27,7 @@
 # a toolchain is a seeding step that can be missing one.
 #
 # Usage:
-#   scaffold/seed-service.sh --name <service> --lang <language> --dest <dir> [--module <path>] [--adr <path>] [--ops-repo <owner/name>]
+#   scaffold/seed-service.sh --name <service> --lang <language> --dest <dir> [--module <path>] [--adr <path>] [--ops-repo <owner/name>] [--profile <conf>]
 #
 #   --name    the service name; becomes the repo name, the binary, and every <SERVICE> in
 #             the seeded files
@@ -38,6 +38,8 @@
 #             commit one
 #   --adr     the path, inside the new repo, of the ADR that decided --lang. Recorded in
 #             .xal/seed.config. Defaults to docs/adr/0001-stack-selection.md
+#   --profile a factory profile (the ops repo's .xal/factory.conf): every service-scope option
+#             it sets is copied into this repo's .xal/factory.conf. `xal-factory seed` passes it
 #   --ops-repo the owner/name of the factory's ops repo (admitted specs, the spend ledger).
 #             Written to .xal/factory.conf as factory.ops_repo. Optional here because a repo
 #             can be seeded before its ops repo exists, but the driver refuses to run
@@ -65,7 +67,7 @@ languages() { find "$SCAFFOLD/lang" -mindepth 1 -maxdepth 1 -type d -exec basena
 
 usage() {
   cat >&2 <<EOF
-usage: scaffold/seed-service.sh --name <service> --lang <language> --dest <dir> [--module <path>] [--adr <path>] [--ops-repo <owner/name>]
+usage: scaffold/seed-service.sh --name <service> --lang <language> --dest <dir> [--module <path>] [--adr <path>] [--ops-repo <owner/name>] [--profile <conf>]
 
   --lang has no default. Stack selection is a per-service, human-gated decision recorded as
   that service's first ADR; a script must not make it.
@@ -75,7 +77,7 @@ $(languages | sed 's/^/    /')
 EOF
 }
 
-NAME=""; LANG_ID=""; DEST=""; MODULE=""; ADR="docs/adr/0001-stack-selection.md"; OPS_REPO=""
+NAME=""; LANG_ID=""; DEST=""; MODULE=""; ADR="docs/adr/0001-stack-selection.md"; OPS_REPO=""; PROFILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --name)   NAME="${2:-}"; shift 2 ;;
@@ -84,6 +86,7 @@ while [ $# -gt 0 ]; do
     --module) MODULE="${2:-}"; shift 2 ;;
     --adr)    ADR="${2:-}";  shift 2 ;;
     --ops-repo) OPS_REPO="${2:-}"; shift 2 ;;
+    --profile)  PROFILE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf '%sunknown argument: %s%s\n' "$RED" "$1" "$RST" >&2; usage; exit 2 ;;
   esac
@@ -122,6 +125,9 @@ case "$OPS_REPO" in
   *) printf '%s--ops-repo must be <owner>/<name>, got %s%s\n' "$RED" "$OPS_REPO" "$RST" >&2; exit 2 ;;
 esac
 VERSION="$(cat "$PROCESS/VERSION")"
+[ -z "$PROFILE" ] || [ -f "$PROFILE" ] || { printf '%s--profile names no file: %s%s\n' "$RED" "$PROFILE" "$RST" >&2; exit 2; }
+# shellcheck source=../factory/lib.sh
+FACTORY_ROOT="$PROCESS" . "$PROCESS/factory/lib.sh" || die "factory/lib.sh is missing from this checkout" 2
 
 printf '\n%sSeeding %s (%s) into %s%s\n' "$BOLD" "$NAME" "$LANG_ID" "$DEST" "$RST"
 
@@ -221,6 +227,9 @@ step "writing .xal/factory.conf"
   if [ -n "$OPS_REPO" ]; then printf 'factory.ops_repo = %s\n' "$OPS_REPO"
   else printf '# factory.ops_repo = <owner>/<name>   REQUIRED before the first driver run\n'; fi
 } > "$DEST/.xal/factory.conf"
+[ -n "$PROFILE" ] && opt_apply_profile "$PROFILE" service "$DEST/.xal/factory.conf"
+opt_write_defaults service "$VERSION" "$DEST/.xal/factory.defaults"
+note "defaults for $(grep -vc '^#' "$DEST/.xal/factory.defaults") option(s) in .xal/factory.defaults"
 note "factory.ops_repo = ${OPS_REPO:-<unset, a human-only step below>}"
 
 # --- 7: git ---------------------------------------------------------------------------------

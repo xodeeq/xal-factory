@@ -58,6 +58,19 @@ mkdir -p "$DEST/.claude"
 cp "$SCAFFOLD/common/.claude/settings.json" "$DEST/.claude/settings.json" || die "copying .claude/settings.json failed"
 note "$(find "$DEST" -type f | wc -l | tr -d ' ') files"
 
+step "writing the factory profile"
+# The ops repo's conf is the factory profile: ops options, and the service options every new
+# service starts from. `xal-factory init` fills it; seeded by hand it holds only comments.
+# shellcheck source=../factory/lib.sh
+FACTORY_ROOT="$PROCESS" . "$PROCESS/factory/lib.sh" || die "factory/lib.sh is missing from this checkout" 2
+opt_write_defaults "service ops" "$(cat "$PROCESS/VERSION")" "$DEST/.xal/factory.defaults"
+{
+  printf '# .xal/factory.conf: the factory profile. key = value, one per line.\n'
+  printf '# Ops options apply to this repo; service options set here are the starting values\n'
+  printf '# for every service seeded with `xal-factory seed`. Defaults: .xal/factory.defaults.\n'
+} > "$DEST/.xal/factory.conf"
+note "defaults for $(grep -vc '^#' "$DEST/.xal/factory.defaults") option(s); profile in .xal/factory.conf"
+
 step "filling placeholders"
 while IFS= read -r t; do
   [ -n "$t" ] || continue
