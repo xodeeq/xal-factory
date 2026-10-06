@@ -46,6 +46,11 @@ Format: `source:path` → `factory path` · stripped · parameterized.
 | xal-platform:scaffold/common/.claude/commands/run-session.md | plugins/xal-factory/commands/run-session.md | the workspace repo, the person, stage names | adds the dispatch step it lacked |
 | xal-company:plugins/xcos-core/agents/reader.md | plugins/xal-factory/agents/reader.md | company frontmatter, requirement id | — |
 | xal-company:plugins/xcos-core/commands/{explain,idea}.md | plugins/xal-factory/commands/ | version marker; the company repo | `/idea` finds the ops repo from env, conf, or the current repo |
+| xal-company:specs/{README,TEMPLATE}.md, scripts/spec-intake-check.sh, gates/spec-intake.test.sh + fixtures | scaffold/ops/specs/, scripts/, gates/ | the person, the units, the frontmatter-schema history, the slugs file | fixture ledgers recomputed after stripping; deliberate mismatches kept |
+| xal-company:scripts/plan-critic-check.sh, gates/plan-critic.test.sh + fixtures | scaffold/ops/scripts/, gates/ | the roadmap, the person, principle numbers | `spec_admitted_at` examples name `factory-ops` |
+| xal-company:scripts/status-render.sh, tests/status-render.test.sh + fixtures, .github/workflows/nudge.yml, gates.yml | scaffold/ops/ | locale, history, the claude CLI step | the status template ships with placeholders |
+| xal-company:.claude/agents/{planner,plan-critic,adr-critic,idea-triage}.md; workspace .claude/agents/{research,system}.md | scaffold/ops/.claude/agents/ | company frontmatter, pattern codes, principle numbers, the person, product ids | the decision map is the `decision-map` label |
+| (new) | scaffold/seed-ops.sh, scaffold/ops/{scripts/check.sh,gates/check.test.sh,CLAUDE.md.template,status/current.md,.xal/gate-inputs} | — | an empty intake tree passes with a printed notice, and only when the ledger is empty too |
 | xal-company:scripts/reader-eval.sh, gates/reader-eval.test.sh, gates/fixtures/reader, .github/workflows/reader-eval.yml | same paths | plugin name, run id | gate 9 here |
 
 ## Deferred
@@ -60,5 +65,7 @@ bring it in. Nothing enters without a caller.
 | xal-platform:adr/0006, 0007, 0008 | already re-recorded as adr/0002, 0003, 0004 on 2026-09-20 | none |
 | xal-company:docs/adr/0001-0004, 0006, 0007 | product or company specific | none |
 | xal-platform:scaffold/common/.github/workflows/board-add.yml | dropped at the first extraction and still dropped | `ops.board = github-projects` gains a caller |
+| xal-company:.claude/agents/{chief-of-staff,process-engineer}.md | no caller yet | the improvement session is built |
+| xal-company:scripts/{board.sh,board-hygiene.sh,triage-load.sh,check-replicas.sh,check-unused.sh,frontmatter-check.sh} | no caller yet | `ops.board = github-projects`, a second replica pair, or a document schema |
 | xal-company:plugins/xcos-core/commands/wrap-session.md | the factory's own generalized `/wrap-session` (2026-09-20) is kept | a ritual step the factory lacks proves itself |
 | xal-org: the three driver scripts that differ from the scaffold | the scaffold copy is canonical; the differences are older copies in that service, pending its re-sync | none |

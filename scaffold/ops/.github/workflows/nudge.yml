@@ -1,0 +1,52 @@
+name: nudge
+# Weekday nudge rendered from status/current.md. No AI provider involved:
+# the file is the source, GitHub is the scheduler and the delivery channel.
+# Delivery: the body of one pinned issue labelled `nudge` is replaced each run;
+# GitHub notifications (email/mobile) carry it to whoever watches the issue.
+# workflow_dispatch is declared so the cron can be proven by hand: a schedule nobody has seen
+# fire is a schedule nobody knows works.
+on:
+  schedule:
+    - cron: "30 6 * * 1-5"   # 06:30 UTC, weekdays; change the hour to the owner's morning
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["status/current.md"]   # a status commit re-renders immediately
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  render:
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      # Pinned to a full commit SHA, not a moving tag: a tag can be repointed at any
+      # commit by its owner, so `@v4` is a promise about a name, not about code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+      - name: Gate (fixtures must fail, clean must pass)
+        run: bash gates/status-render.test.sh
+      - name: Render
+        id: render
+        run: |
+          {
+            echo "body<<EOF"
+            scripts/status-render.sh status/current.md
+            echo
+            echo "_Rendered $(date -u +%Y-%m-%dT%H:%MZ) from status/current.md @ ${GITHUB_SHA::7}. Edit the file, not this issue._"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Post to the pinned nudge issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ steps.render.outputs.body }}
+        run: |
+          n=$(gh issue list --label nudge --state open --json number --jq '.[0].number // empty')
+          if [ -z "$n" ]; then
+            n=$(gh issue create --title "Today's one action" --label nudge --body "$BODY" | grep -oE '[0-9]+$')
+            gh issue pin "$n" || true
+          else
+            gh issue edit "$n" --body "$BODY"
+            # a fresh comment is what triggers a notification; the body is the canonical text
+            gh issue comment "$n" --body "$(printf '%s\n' "$BODY" | head -n 1)"
+          fi

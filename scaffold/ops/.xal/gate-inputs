@@ -1,0 +1,14 @@
+# .xal/gate-inputs: the declared input contract for scripts/check.sh (the ops repo).
+#
+# Every gate in scripts/check.sh that needs something NOT in this repo declares it here,
+# and .xal/check-gate-inputs.sh asserts that every workflow invoking that script supplies
+# it. See docs/process/gate-discipline.md §4 in any service repo, or the factory's spec.
+#
+# Format:  id | detect | required-in-ci | caller-pattern | expires | description
+#   detect          command:<name> | env:<VAR> | none
+#   required-in-ci  yes = the gate FAILS when absent under CI=true; no = it skips
+#   caller-pattern  ERE every caller must match, `<workflow>:<ERE>` for one workflow, or `-`
+#   expires         ISO date, or `-` for an input that cannot expire. A `secrets.` pattern
+#                   must carry a real date.
+
+python3 | command:python3 | yes | - | - | python3, for the status-render gate (scripts/status-render.sh parses the frontmatter with it). Provided by the ubuntu-latest runner image, and mandatory under CI=true.

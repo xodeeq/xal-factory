@@ -497,6 +497,25 @@ reader_eval_step() {
   bash gates/reader-eval.test.sh
 }
 
+# --- gate 10: the ops scaffold seeds a repo whose gate is green ---------------------------
+# scaffold/seed-ops.sh is run once per factory, so a broken ops scaffold would be found by
+# exactly one person, on their first day. This gate seeds one into a throwaway directory and
+# runs its gate and its fixture harness, so the ops scaffold is proven on every build here
+# rather than by its first adopter. python3 (the status render) is its one input.
+ops_seed_step() {
+  local tmp rc
+  tmp="$(mktemp -d)" || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+  bash scaffold/seed-ops.sh --name Gate --dest "$tmp/ops" >/dev/null 2>&1 \
+    || { printf '%s  seed-ops.sh failed%s\n' "$RED" "$RST"; bash scaffold/seed-ops.sh --name Gate --dest "$tmp/ops2" 2>&1 | tail -5; return 1; }
+  ( cd "$tmp/ops" && bash scripts/check.sh >"$tmp/out" 2>&1 ); rc=$?
+  if [ "$rc" -ne 0 ]; then printf '%s  the seeded ops repo is RED:%s\n' "$RED" "$RST"; tail -15 "$tmp/out" | sed 's/^/    /'; return 1; fi
+  ( cd "$tmp/ops" && bash gates/check.test.sh >"$tmp/out" 2>&1 ); rc=$?
+  if [ "$rc" -ne 0 ]; then printf '%s  the seeded ops repo cannot prove its gate fails:%s\n' "$RED" "$RST"; tail -15 "$tmp/out" | sed 's/^/    /'; return 1; fi
+  printf '  a seeded ops repo is green, and its harness proves each gate can fail\n'
+}
+
 # --- run the gates -------------------------------------------------------------
 gate "gate inputs declared + every caller wired"            gate_inputs_step
 gate "plugin manifests (claude plugin validate --strict)"   plugin_manifests_step
@@ -507,6 +526,7 @@ gate "scaffold self-consistency"                            scaffold_consistency
 gate "seed-set fixtures (proven able to fail)"              seed_fixtures_step
 gate "seed sets complete (every language seeds a gate)"     seed_set_step
 gate "reader evaluator fixtures (proven able to fail)"     reader_eval_step
+gate "ops scaffold seeds a green repo"                     ops_seed_step
 gate "sync round-trip"                                      sync_roundtrip_step
 
 summary
