@@ -54,7 +54,11 @@ models.reader|claude-opus-5-5
 budget.driver_max_turns|200
 budget.reader_max_turns|80
 reader.ref|xal-factory--v<VERSION>
-ops.ledger_path|status/costs.jsonl'
+ops.ledger_path|status/costs.jsonl
+deploy.target|none
+deploy.url|none'
+# deploy.target: none (deploy.yml refuses, loudly) or fly. deploy.url: the live base URL the
+#   smoke gate drives after a deploy, `none` until there is one.
 # factory.ops_repo: the owner/name of the ops repo holding admitted specs and the spend
 #   ledger. Required because no script can know which repository that is.
 
