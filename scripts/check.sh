@@ -504,6 +504,9 @@ reader_eval_step() {
 # rather than by its first adopter. python3 (the status render) is its one input.
 ops_seed_step() {
   local tmp rc
+  # The seeder commits, and a CI runner has no git identity. A throwaway one, for this
+  # throwaway repo only, when none is configured.
+  git var GIT_AUTHOR_IDENT >/dev/null 2>&1 || export GIT_AUTHOR_NAME=gate GIT_AUTHOR_EMAIL=gate@example.invalid GIT_COMMITTER_NAME=gate GIT_COMMITTER_EMAIL=gate@example.invalid
   tmp="$(mktemp -d)" || return 1
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" RETURN
