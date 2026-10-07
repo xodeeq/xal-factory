@@ -11,8 +11,10 @@ it never edits a vendored copy. Edit the spec **here**.
 
 | File | What it governs |
 |---|---|
+| [`lifecycle.md`](lifecycle.md) | The factory's path from a one-line idea to a monitored service: each stage's artifact, gate and decider, and how autonomy is granted by risk class. Start here. |
+| [`session-types.md`](session-types.md) | The typed sessions that run the lifecycle, each a contract: trigger, inputs, outputs, gate, scope, who is in the loop, home. |
 | [`process-guide.md`](process-guide.md) | The engineering lifecycle: the phases and the Definition of Done a service moves through, with tools per phase. Informative; the other files are normative. |
-| [`service-conventions.md`](service-conventions.md) | The §1–9 operational + HTTP **contract** surface: API description, health, telemetry, logging, trace propagation, container interface, event envelope, purity, variation-behind-contract. |
+| [`service-conventions.md`](service-conventions.md) | The §1–10 operational + HTTP **contract** surface: API description, health, telemetry, logging, trace propagation, container interface, event envelope, purity, variation behind a contract with every flag defaulted, the problem document. |
 | [`deployment-conventions.md`](deployment-conventions.md) | The **deployment** contract: runtime reproducible from files, migrations as a release step, secrets and fail-fast, health wiring, the smoke gate, CD from `main`. |
 | [`gate-discipline.md`](gate-discipline.md) | What makes a gate script's verdict trustworthy: one script, the gate order, declared inputs, committed failing fixtures, exit codes, coverage ratchets, nothing without a caller. |
 | [`adr-discipline.md`](adr-discipline.md) | How decisions are recorded (Context → Decision → Consequences), numbered, superseded; process-level vs repo-level ADRs. |
