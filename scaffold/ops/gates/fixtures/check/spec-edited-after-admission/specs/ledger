@@ -1,0 +1,12 @@
+# specs/ledger: the admission record.
+#
+# One line per admitted spec:   service | spec_version | sha256 | admitted | source
+#
+# scripts/spec-intake-check.sh recomputes every digest on every run, so a spec edited
+# after admission is a red build. That is what makes "admitted verbatim" a checkable
+# property rather than a promise (specs/README.md, "Admission: verbatim, or flagged").
+#
+# The record is keyed on the PATH, specs/admitted/<service>/<spec_version>.md, because the
+# path is the slot a consumer resolves. Records are never removed: a superseded spec stays
+# admitted, and what a spec said when a decision was taken is evidence.
+orders | 1.0.0 | cb438d2a713d64baa690ed4a4ace77efb97cfbea5e5512bc0e312b260a64ceb3 | 2026-10-05 | fixture: the digest of a version that no longer exists

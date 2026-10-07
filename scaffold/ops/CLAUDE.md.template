@@ -1,0 +1,55 @@
+# CLAUDE.md: <FACTORY> ops repo
+
+This repository is the factory as a repo: the specs it builds from, the status it runs on,
+the cost it has spent, the ideas it has not yet triaged, and the agents that plan and
+judge. Nothing here is a service, and no service code is written here.
+
+## Before anything else
+
+Read `status/current.md`. It is the one record of where the factory is: the active build
+track, the next action, the research lane, and what waits on the owner. Every session, in
+any repo, reads it first and updates it last.
+
+## Session types
+
+Every session names its type in its first line. The contracts are in the process spec
+(`spec/session-types.md` in the factory, vendored into every service as
+`docs/process/session-types.md`). The two that start here:
+
+| Task | Type | How it starts |
+|---|---|---|
+| Improving how the factory works | **system** | `claude --agent system` |
+| A problem to research, a spec to write, a stack to choose | **research** | `claude --agent research` |
+
+A planning session runs `planner`, then `scripts/plan-critic-check.sh`, then `plan-critic`,
+against an admitted spec and a seeded service repo. An implementation session is never typed
+by hand: it is `/run-session <SID>` from the service repo.
+
+## What lives here
+
+| Path | What it is | Its gate |
+|---|---|---|
+| `specs/` | admitted specs, verbatim, and the ledger of their digests | `scripts/spec-intake-check.sh` (ten rules) |
+| `scripts/plan-critic-check.sh` | the plan critic's mechanical half | its fixtures, `gates/plan-critic.test.sh` |
+| `status/current.md` | the operating status; its frontmatter feeds the weekday nudge | `scripts/status-render.sh` |
+| `status/costs.jsonl` | the spend ledger every driver and reader run appends to | the ceilings in each plan |
+| `.claude/agents/` | planner, plan-critic, adr-critic, idea-triage, research, system | |
+| `docs/research/`, `docs/adr/` | research briefs and the factory's own decisions | |
+| the issue labelled `ideas` | the idea inbox (`/idea <text>` from any repo) | every line accounted for at the weekly review |
+
+`scripts/check.sh` is the gate; CI runs it verbatim, and `gates/check.test.sh` proves it can
+fail.
+
+## Rules that hold here
+
+- **One active build track, at most one research lane.**
+- **Park at gates, never bypass them.** A decision that is the owner's goes in the decision
+  queue in `status/current.md`. A wait on the world is recorded as blocked.
+- **Verify artifacts, never self-reports.** A session that cannot show a path, a PR or a URL
+  has not done the thing.
+- **Specs are admitted verbatim.** A source that does not fit the format is flagged in the
+  admission PR, never quietly reshaped.
+- **Every flag ships with a default.** Only a flag that cannot be defaulted is `required`,
+  with its reason.
+- **Telemetry appends to main; code never does.** The spend ledger is the one file machines
+  write here without review.

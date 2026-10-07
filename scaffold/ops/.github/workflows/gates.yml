@@ -1,0 +1,43 @@
+name: Gates
+
+# CI invokes scripts/check.sh and nothing else, so "green locally" equals "green in CI"
+# byte for byte. To change a gate, change that script, not this workflow.
+#
+# The one thing this file owns is INPUTS: the things scripts/check.sh needs that are not
+# in the repo. They are declared in .xal/gate-inputs, and gate 0 (which runs first and
+# needs no inputs of its own) asserts that this workflow supplies every one of them. That
+# ordering is why a gate gaining a dependency fails in the author's local run, before push,
+# instead of in one caller and not another.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same PR supersedes the run on the older head, so cancel it; the new head
+# gets its own full run. Pushes to main and manual runs never share a group (run_id is unique),
+# so no main commit is ever cancelled and left unjudged.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The `./` prefix is not decoration: gate 0's caller detection matches
+      # `\./?scripts/check\.sh`, so a bare `scripts/check.sh` reads as NO CALLER FOUND and
+      # fails the gate for a reason that has nothing to do with inputs. Keep it.
+      - name: Run gates (scripts/check.sh)
+        env:
+          CI: "true"
+        run: ./scripts/check.sh
+
+      - name: Prove the gates can fail (gates/check.test.sh)
+        run: ./gates/check.test.sh
