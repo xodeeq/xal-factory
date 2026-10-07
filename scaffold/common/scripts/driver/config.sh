@@ -15,7 +15,8 @@
 #
 # EVERY KEY HAS A DEFAULT, OR SAYS WHY IT CANNOT. A repo whose conf sets nothing runs the
 # default profile. `factory.ops_repo` is the one required key: there is no repository a
-# script could guess. The seeder writes it.
+# script could guess. The seeder writes it. `xal-factory config explain <key>` says what each
+# key does and how to change it.
 #
 # Usage:
 #   config.sh --get <key>       print one value (the conf's, else the default)
@@ -24,6 +25,7 @@
 #   config.sh --list            print `key = value  (default|set)` for every key
 #   config.sh --keys            print every known key with its default, tab-separated
 #   [--file <path>]             read this conf instead of .xal/factory.conf
+#   FACTORY_DEFAULTS=<path>     read these defaults instead of .xal/factory.defaults
 # Exit: 0 ok · 2 cannot run (unknown key, malformed line, required key unset)
 
 set -uo pipefail
@@ -35,7 +37,7 @@ KEY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --file) FILE="${2:-}"; shift 2 ;;
-    --get)  MODE=get; KEY="${2:-}"; shift 2 ;;
+    --get)  MODE="get"; KEY="${2:-}"; shift 2 ;;
     --emit) MODE=emit; shift ;;
     --list) MODE=list; shift ;;
     --keys) MODE=keys; shift ;;
@@ -44,23 +46,15 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$MODE" ] || { printf 'config: one of --get, --emit, --list, --keys is required\n' >&2; exit 2; }
 
-# key | default. `required` means no default can exist; the reason is in the comment beside it.
-# Kept in step with the factory's options registry; the factory's own gate diffs the two.
-DEFAULTS='factory.ops_repo|required
-factory.process_repo|xodeeq/xal-factory
-factory.escalation_label|needs-human
-models.driver|claude-opus-5-5
-models.reader|claude-opus-5-5
-budget.driver_max_turns|200
-budget.reader_max_turns|80
-reader.ref|xal-factory--v<VERSION>
-ops.ledger_path|status/costs.jsonl
-deploy.target|none
-deploy.url|none'
-# deploy.target: none (deploy.yml refuses, loudly) or fly. deploy.url: the live base URL the
-#   smoke gate drives after a deploy, `none` until there is one.
-# factory.ops_repo: the owner/name of the ops repo holding admitted specs and the spend
-#   ledger. Required because no script can know which repository that is.
+# THE DEFAULTS ARE NOT TYPED HERE. The seeder writes .xal/factory.defaults (key<TAB>default)
+# from the factory's options registry (factory/options.tsv), so the list of keys and their
+# defaults has one source. A repo seeded before an option existed simply does not know it,
+# which is the seed model: the repo owns what it was seeded with.
+DEFAULTS_FILE="${FACTORY_DEFAULTS:-.xal/factory.defaults}"
+[ -f "$DEFAULTS_FILE" ] || { printf 'config: %s is missing: this repo was not seeded by the factory, or the file was deleted\n' "$DEFAULTS_FILE" >&2; exit 2; }
+DEFAULTS="$(awk -F'\t' '!/^#/ && NF >= 2 { print $1 "|" $2 }' "$DEFAULTS_FILE")"
+[ -n "$DEFAULTS" ] || { printf 'config: %s names no key\n' "$DEFAULTS_FILE" >&2; exit 2; }
+# `required` means no default can exist: factory.ops_repo, the ops repo no script can guess.
 
 known() { printf '%s\n' "$DEFAULTS" | cut -d'|' -f1 | grep -qx -- "$1"; }
 default_of() { printf '%s\n' "$DEFAULTS" | awk -F'|' -v k="$1" '$1 == k { print $2 }'; }

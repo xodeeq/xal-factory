@@ -519,6 +519,29 @@ ops_seed_step() {
   printf '  a seeded ops repo is green, and its harness proves each gate can fail\n'
 }
 
+# --- gate 11: the options registry is whole and in step -----------------------------------
+# factory/options.tsv drives the onboarding, `xal-factory config`, every seeded repo's
+# defaults and the docs. scripts/check-options.sh holds its rules.
+options_step() { bash scripts/check-options.sh; }
+
+# --- gate 12: the installer and the CLI work end to end -----------------------------------
+# install.sh, `xal-factory init --yes` with a scripted non-default answer set, `seed`, and
+# `config set` refusing what it must, in a throwaway HOME, offline.
+install_step() { bash gates/install.test.sh; }
+
+# --- gate 13: the shell this repo ships is shellcheck-clean -------------------------------
+# Every adopter runs these scripts on their own machine, under whatever bash they have.
+# shellcheck at warning severity; skipped locally without it, mandatory under CI=true.
+SHELLCHECKED="install.sh bin/xal-factory factory/lib.sh scaffold/seed-ops.sh scaffold/seed-service.sh scaffold/common/scripts/driver/config.sh scaffold/common/scripts/smoke.sh scripts/check-options.sh"
+shellcheck_step() {
+  if ! command -v shellcheck >/dev/null 2>&1; then
+    if [ "${CI:-}" = "true" ]; then printf '%sshellcheck is required in CI.%s\n' "$RED" "$RST"; return 1; fi
+    printf '%s⚠ shellcheck unavailable: SKIPPING (mandatory in CI).%s\n' "$YEL" "$RST"; return 0
+  fi
+  # shellcheck disable=SC2086
+  shellcheck -x -S warning $SHELLCHECKED && printf '  clean: %s\n' "$SHELLCHECKED"
+}
+
 # --- run the gates -------------------------------------------------------------
 gate "gate inputs declared + every caller wired"            gate_inputs_step
 gate "plugin manifests (claude plugin validate --strict)"   plugin_manifests_step
@@ -529,6 +552,9 @@ gate "scaffold self-consistency"                            scaffold_consistency
 gate "seed-set fixtures (proven able to fail)"              seed_fixtures_step
 gate "seed sets complete (every language seeds a gate)"     seed_set_step
 gate "reader evaluator fixtures (proven able to fail)"     reader_eval_step
+gate "options registry whole and in step"                  options_step
+gate "installer and CLI, end to end"                       install_step
+gate "shell is shellcheck-clean"                           shellcheck_step
 gate "ops scaffold seeds a green repo"                     ops_seed_step
 gate "sync round-trip"                                      sync_roundtrip_step
 

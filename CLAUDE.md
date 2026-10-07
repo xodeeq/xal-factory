@@ -40,7 +40,8 @@ language's terms, it is not a process rule yet — it belongs in that repo.
 | a seeded repo's gate script, CI, fixtures | **that repo** | a starting point it owns ([ADR-0002](adr/0002-repo-seeding.md)); not synced |
 | the session ritual commands, skills and the reader agent | **`plugins/xal-factory/`** | distributed as a plugin ([ADR-0003](adr/0003-claude-config-boundary.md)); a repo's `.claude/` holds only what is true of that repo. The reader is pinned by release tag `xal-factory--v<VERSION>`, cut only after `reader-eval.yml` is green |
 | the pipeline: driver, chain, merge, reader workflows and `scripts/driver/` | **`scaffold/common/`** | seeded into every service ([ADR-0007](adr/0007-pipeline-driver.md), [ADR-0008](adr/0008-auto-merge-and-the-reader.md)); proven here by seeding a repo and running `gates/driver.test.sh` |
-| the factory configuration keys and their defaults | **`scaffold/common/scripts/driver/config.sh`** | a seeded repo sets only what differs, in `.xal/factory.conf` |
+| every option, its default, and how to change it | **`factory/options.tsv`** | read by `bin/xal-factory`, the seeders (which write each repo's `.xal/factory.defaults`), the docs, and gate 11 ([ADR-0009](adr/0009-configuration.md)); a repo sets only what differs, in `.xal/factory.conf`, read by `scaffold/common/scripts/driver/config.sh` |
+| the installer and the CLI | **`install.sh`, `bin/xal-factory`** | bash 3.2 and later, no other runtime; gate 12 runs them end to end, gate 13 shellchecks them |
 | the ops repo: spec intake, the plan critic, status, the nudge, the agents | **`scaffold/ops/`** | seeded once per factory by `scaffold/seed-ops.sh`; gate 10 seeds one and runs its gate on every build |
 | what was lifted from the source estate, and when | **`docs/lift-ledger.md`** | one row per lifted file; the input to the next lift |
 

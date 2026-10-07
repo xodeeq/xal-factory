@@ -1,0 +1,441 @@
+#!/usr/bin/env bash
+#
+# xal-factory: set up and run a Xal Software Factory from the terminal.
+#
+#   xal-factory init      onboarding: pick options (defaults shown), seed the ops repo
+#   xal-factory seed      seed a service repo from the factory profile
+#   xal-factory config    list | get <key> | set <key> <value> | explain [<key>]
+#   xal-factory enable    <feature>   (driver, chain, reader, mention, review, nudge)
+#   xal-factory disable   <feature>
+#   xal-factory apply     make GitHub match .xal/factory.conf (workflows on or off, variables)
+#   xal-factory doctor    tools, credentials, configuration, expiry placeholders, drift
+#
+# Every option, its default and how to change it later live in one registry,
+# factory/options.tsv, which this CLI, the seeders, the docs and gate 11 all read.
+#
+# Prompts use `gum` when it is installed and plain `read` otherwise, and read from the
+# terminal even when this runs under `curl | bash`. With no terminal, or with --yes, every
+# question takes its default.
+
+set -uo pipefail
+
+SELF="$0"
+while [ -L "$SELF" ]; do
+  t="$(readlink "$SELF")"
+  case "$t" in /*) SELF="$t" ;; *) SELF="$(dirname "$SELF")/$t" ;; esac
+done
+FACTORY_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+export FACTORY_ROOT
+# shellcheck source=../factory/lib.sh
+. "$FACTORY_ROOT/factory/lib.sh"
+VERSION="$(cat "$FACTORY_ROOT/VERSION")"
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xal-factory"
+STATE="$STATE_DIR/state"
+
+if [ -t 1 ]; then BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GREEN=$'\033[32m'; YEL=$'\033[33m'; CYAN=$'\033[36m'; RST=$'\033[0m'
+else BOLD=""; DIM=""; RED=""; GREEN=""; YEL=""; CYAN=""; RST=""; fi
+
+die()  { printf '%s%s%s\n' "$RED" "$1" "$RST" >&2; exit "${2:-1}"; }
+say()  { printf '%s\n' "$*"; }
+head1() { printf '\n%s%s%s\n' "$BOLD" "$1" "$RST"; }
+later() { printf '  %schange later:%s %s\n' "$DIM" "$RST" "$1"; }
+
+# --- prompting -------------------------------------------------------------------------
+YES=0
+TTY=""
+if [ -r /dev/tty ] && [ -w /dev/tty ] && { : < /dev/tty; } 2>/dev/null; then TTY=/dev/tty; fi
+interactive() { [ "$YES" = 0 ] && [ -n "$TTY" ]; }
+HAVE_GUM=0; command -v gum >/dev/null 2>&1 && HAVE_GUM=1
+
+# ask_text <question> <default>  -> prints the answer
+ask_text() {
+  local q="$1" d="$2" a
+  if ! interactive; then printf '%s' "$d"; return; fi
+  if [ "$HAVE_GUM" = 1 ]; then
+    a="$(gum input --header "$q" --value "$d" < "$TTY" 2> "$TTY")" || a="$d"
+  else
+    printf '%s %s[%s]%s: ' "$q" "$DIM" "$d" "$RST" > "$TTY"
+    IFS= read -r a < "$TTY" || a=""
+  fi
+  printf '%s' "${a:-$d}"
+}
+
+# ask_choice <question> <default> <a|b|c>  -> prints the choice
+ask_choice() {
+  local q="$1" d="$2" choices="$3" a i n
+  if ! interactive; then printf '%s' "$d"; return; fi
+  local -a opts; IFS='|' read -r -a opts <<< "$choices"
+  if [ "$HAVE_GUM" = 1 ]; then
+    a="$(gum choose --header "$q" --selected "$d" "${opts[@]}" < "$TTY" 2> "$TTY")" || a="$d"
+    printf '%s' "${a:-$d}"; return
+  fi
+  printf '%s\n' "$q" > "$TTY"
+  n=0; for i in "${opts[@]}"; do n=$((n + 1)); printf '  %d) %s%s\n' "$n" "$i" "$([ "$i" = "$d" ] && printf ' (default)')" > "$TTY"; done
+  while :; do
+    printf '  choose 1-%d, Enter for %s: ' "$n" "$d" > "$TTY"
+    IFS= read -r a < "$TTY" || a=""
+    [ -z "$a" ] && { printf '%s' "$d"; return; }
+    if printf '%s' "$a" | grep -qE '^[0-9]+$' && [ "$a" -ge 1 ] && [ "$a" -le "$n" ]; then printf '%s' "${opts[$((a - 1))]}"; return; fi
+    for i in "${opts[@]}"; do [ "$a" = "$i" ] && { printf '%s' "$i"; return; }; done
+    printf '  %snot one of the choices%s\n' "$RED" "$RST" > "$TTY"
+  done
+}
+
+# ask_yes <question> <default y|n>  -> exit 0 for yes
+ask_yes() {
+  local q="$1" d="$2" a
+  if ! interactive; then [ "$d" = y ]; return; fi
+  if [ "$HAVE_GUM" = 1 ]; then
+    if [ "$d" = y ]; then gum confirm "$q" --default=true < "$TTY" 2> "$TTY"; else gum confirm "$q" --default=false < "$TTY" 2> "$TTY"; fi
+    return
+  fi
+  printf '%s %s[%s]%s ' "$q" "$DIM" "$([ "$d" = y ] && printf 'Y/n' || printf 'y/N')" "$RST" > "$TTY"
+  IFS= read -r a < "$TTY" || a=""
+  case "${a:-$d}" in y|Y|yes) return 0 ;; *) return 1 ;; esac
+}
+
+# --- the repo this command acts on --------------------------------------------------------
+repo_root() { git rev-parse --show-toplevel 2>/dev/null || pwd; }
+conf_file()     { printf '%s/.xal/factory.conf' "$(repo_root)"; }
+defaults_file() { printf '%s/.xal/factory.defaults' "$(repo_root)"; }
+need_factory_repo() {
+  [ -f "$(defaults_file)" ] || die "no .xal/factory.defaults here: run this inside a repo seeded by the factory (or run \`xal-factory init\`)" 2
+}
+# The value of a key in this repo: the conf's, else the repo's default.
+repo_value() {
+  local v
+  v="$(sed 's/#.*//' "$(conf_file)" 2>/dev/null | awk -F= -v k="$1" '{ x = $1; gsub(/^[ \t]+|[ \t]+$/, "", x) } x == k { v = substr($0, index($0, "=") + 1); gsub(/^[ \t]+|[ \t]+$/, "", v) } END { print v }')"
+  [ -n "$v" ] || v="$(awk -F'\t' -v k="$1" '!/^#/ && $1 == k { print $2 }' "$(defaults_file)")"
+  printf '%s' "$v"
+}
+repo_knows() { awk -F'\t' -v k="$1" '!/^#/ && $1 == k { f = 1 } END { exit !f }' "$(defaults_file)"; }
+
+# Write `key = value` into a conf, replacing an existing line for that key.
+conf_put() {
+  local file="$1" k="$2" v="$3" tmp
+  mkdir -p "$(dirname "$file")"; touch "$file"
+  tmp="$(mktemp)"
+  awk -v k="$k" -v v="$v" '
+    { line = $0; x = line; sub(/#.*/, "", x); split(x, p, "="); key = p[1]; gsub(/^[ \t]+|[ \t]+$/, "", key) }
+    key == k && !done { print k " = " v; done = 1; next }
+    { print line }
+    END { if (!done) print k " = " v }' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# --- apply: make GitHub match the conf --------------------------------------------------------
+has_remote() { git -C "$(repo_root)" remote get-url origin >/dev/null 2>&1 && command -v gh >/dev/null 2>&1; }
+
+# apply_key <key> [dry]  -> runs (or prints) the gh command that makes the key true
+apply_key() {
+  local k="$1" dry="${2:-}" how v wf cmd
+  how="$(opt_field "$k" 5)"; v="$(repo_value "$k")"
+  case "$how" in
+    workflow:*)
+      wf="${how#workflow:}"
+      [ -f "$(repo_root)/.github/workflows/$wf" ] || return 0
+      if [ "$k" = pipeline.auto_merge ]; then [ "$v" = off ] && v=off || v=on; fi
+      if [ "$v" = on ]; then cmd="gh workflow enable $wf"; else cmd="gh workflow disable $wf"; fi ;;
+    var:*)
+      if [ "$v" = ubuntu-latest ]; then cmd="gh variable delete ${how#var:}"; else cmd="gh variable set ${how#var:} --body $v"; fi ;;
+    *) return 0 ;;
+  esac
+  if [ -n "$dry" ] || ! has_remote; then printf '  %s$ %s%s\n' "$CYAN" "$cmd" "$RST"; return 0; fi
+  if ( cd "$(repo_root)" && $cmd >/dev/null 2>&1 ); then printf '  %s✔%s %s\n' "$GREEN" "$RST" "$cmd"
+  else printf '  %s·%s %s %s(no change, or the workflow is not on the default branch yet)%s\n' "$YEL" "$RST" "$cmd" "$DIM" "$RST"; fi
+}
+
+cmd_apply() {
+  local dry="" k
+  [ "${1:-}" = --dry-run ] && dry=1
+  need_factory_repo
+  has_remote || { say "No GitHub remote (or no gh) for this repo yet, so here is what to run once it is pushed:"; dry=1; }
+  while IFS= read -r k; do repo_knows "$k" && apply_key "$k" "$dry"; done < <(opt_rows | awk -F'\t' '$5 != "conf" { print $1 }')
+}
+
+# --- config -----------------------------------------------------------------------------------
+explain_one() {
+  local k="$1"
+  opt_known "$k" || die "unknown option: $k (\`xal-factory config explain\` lists them)" 2
+  printf '%s%s%s\n' "$BOLD" "$k" "$RST"
+  printf '  %s\n' "$(opt_field "$k" 7)"
+  printf '  default: %s   choices: %s   scope: %s\n' "$(opt_field "$k" 2)" "$(opt_field "$k" 3 | sed 's/^\*$/any text/; s/^int$/a positive whole number/; s/|/, /g')" "$(opt_field "$k" 4)"
+  later "$(opt_field "$k" 8)"
+}
+
+cmd_config() {
+  local sub="${1:-list}"; shift || true
+  case "$sub" in
+    explain)
+      if [ -n "${1:-}" ]; then explain_one "$1"; else
+        while IFS= read -r k; do explain_one "$k"; printf '\n'; done < <(opt_rows | cut -f1)
+      fi ;;
+    list)
+      need_factory_repo
+      awk -F'\t' '!/^#/ && NF >= 2 { print $1 }' "$(defaults_file)" | while IFS= read -r k; do
+        v="$(repo_value "$k")"; d="$(awk -F'\t' -v k="$k" '!/^#/ && $1 == k { print $2 }' "$(defaults_file)")"
+        if [ "$v" = "$d" ]; then printf '  %-28s %s %s(default)%s\n' "$k" "$v" "$DIM" "$RST"
+        else printf '  %-28s %s%s%s\n' "$k" "$BOLD" "$v" "$RST"; fi
+      done ;;
+    get)
+      need_factory_repo; [ -n "${1:-}" ] || die "usage: xal-factory config get <key>" 2
+      repo_knows "$1" || die "this repo has no option $1" 2
+      repo_value "$1"; printf '\n' ;;
+    set)
+      need_factory_repo
+      local k="${1:-}" v="${2:-}"
+      [ -n "$k" ] && [ -n "$v" ] || die "usage: xal-factory config set <key> <value>" 2
+      opt_known "$k" || die "unknown option: $k (\`xal-factory config explain\` lists them)" 2
+      repo_knows "$k" || die "$k is set in the $([ "$(opt_field "$k" 4)" = ops ] && printf 'ops repo' || printf 'service repos'), and this repo does not carry it" 2
+      opt_valid "$k" "$v" || die "$v is not a valid value for $k (choices: $(opt_field "$k" 3))" 2
+      conf_put "$(conf_file)" "$k" "$v"
+      printf '%s✔%s %s = %s  %s(.xal/factory.conf)%s\n' "$GREEN" "$RST" "$k" "$v" "$DIM" "$RST"
+      apply_key "$k"
+      case "$k" in
+        pipeline.auto_merge)
+          say "  Plans the planner emits from now carry autonomy_level $([ "$v" = off ] && printf 'code-only, with merge.yml disabled so nothing merges unattended' || printf '%s' "$v")."
+          say "  A plan already approved keeps its own level until an approved amendment changes it." ;;
+        plan.*) say "  Applies to plans emitted from now; an approved plan keeps its own values." ;;
+        deploy.target) [ "$v" != none ] && say "  Turning a target on is a person's act: read docs/deploy.md, and uncomment the token's row in .xal/gate-inputs with its real expiry." ;;
+      esac
+      say "  Commit .xal/factory.conf by PR: it is a protected path, so a driven session cannot change it." ;;
+    *) die "usage: xal-factory config list | get <key> | set <key> <value> | explain [<key>]" 2 ;;
+  esac
+}
+
+feature_key() {
+  case "$1" in
+    driver) printf 'pipeline.driver' ;; chain) printf 'pipeline.chain' ;; reader) printf 'pipeline.reader' ;;
+    mention) printf 'claude.mention_workflow' ;; review) printf 'claude.pr_review' ;; nudge) printf 'ops.status_nudge' ;;
+    *) die "unknown feature: $1 (driver, chain, reader, mention, review, nudge; auto-merge is \`xal-factory config set pipeline.auto_merge <level>\`)" 2 ;;
+  esac
+}
+cmd_toggle() { local on="$1" f="${2:-}"; [ -n "$f" ] || die "usage: xal-factory $([ "$on" = on ] && printf enable || printf disable) <feature>" 2; cmd_config set "$(feature_key "$f")" "$on"; }
+
+# --- doctor -----------------------------------------------------------------------------------
+cmd_doctor() {
+  local bad=0 t n
+  head1 "Tools"
+  for t in git gh claude jq python3 curl; do
+    if command -v "$t" >/dev/null 2>&1; then printf '  %s✔%s %s\n' "$GREEN" "$RST" "$t"
+    else printf '  %s✗%s %s is missing\n' "$RED" "$RST" "$t"; bad=1; fi
+  done
+  for t in gum docker shellcheck; do
+    command -v "$t" >/dev/null 2>&1 && printf '  %s✔%s %s (optional)\n' "$GREEN" "$RST" "$t" || printf '  %s·%s %s (optional) not installed\n' "$YEL" "$RST" "$t"
+  done
+  if command -v gh >/dev/null 2>&1; then
+    gh auth status >/dev/null 2>&1 && printf '  %s✔%s gh is signed in\n' "$GREEN" "$RST" || { printf '  %s✗%s gh is not signed in: gh auth login\n' "$RED" "$RST"; bad=1; }
+  fi
+  if command -v claude >/dev/null 2>&1; then
+    if claude plugin list 2>/dev/null | grep -q 'xal-factory'; then printf '  %s✔%s the xal-factory plugin is installed\n' "$GREEN" "$RST"
+    else printf '  %s·%s the xal-factory plugin is not installed: claude plugin marketplace add xodeeq/xal-factory && claude plugin install xal-factory@xal-factory\n' "$YEL" "$RST"; fi
+  fi
+  if [ -f "$(defaults_file)" ]; then
+    head1 "This repo ($(basename "$(repo_root)"))"
+    if [ -x "$(repo_root)/scripts/driver/config.sh" ]; then
+      if ( cd "$(repo_root)" && ./scripts/driver/config.sh --emit >/dev/null 2>"$(mktemp)" ); then printf '  %s✔%s .xal/factory.conf is valid and every required option is set\n' "$GREEN" "$RST"
+      else printf '  %s✗%s %s\n' "$RED" "$RST" "$(cd "$(repo_root)" && ./scripts/driver/config.sh --emit 2>&1 >/dev/null | head -1)"; bad=1; fi
+    fi
+    if [ -f "$(repo_root)/.xal/gate-inputs" ]; then
+      n="$(grep -c 'REPLACE-WITH-THE-TOKEN-EXPIRY' "$(repo_root)/.xal/gate-inputs" || true)"
+      if [ "$n" -gt 0 ]; then printf '  %s✗%s %s credential row(s) in .xal/gate-inputs still carry the placeholder expiry: gate 0 stays red until each has its real date\n' "$RED" "$RST" "$n"; bad=1
+      else printf '  %s✔%s every credential in .xal/gate-inputs has an expiry\n' "$GREEN" "$RST"; fi
+    fi
+    if has_remote; then
+      head1 "GitHub against the conf"
+      local k wf want state
+      while IFS= read -r k; do
+        repo_knows "$k" || continue
+        wf="$(opt_field "$k" 5)"; case "$wf" in workflow:*) wf="${wf#workflow:}" ;; *) continue ;; esac
+        [ -f "$(repo_root)/.github/workflows/$wf" ] || continue
+        want="$(repo_value "$k")"; [ "$k" = pipeline.auto_merge ] && { [ "$want" = off ] && want=off || want=on; }
+        state="$(cd "$(repo_root)" && gh workflow view "$wf" --json state --jq .state 2>/dev/null)"
+        case "$state" in active) state=on ;; disabled_manually|disabled_inactivity) state=off ;; *) state="unknown" ;; esac
+        if [ "$state" = "$want" ]; then printf '  %s✔%s %s is %s, as %s says\n' "$GREEN" "$RST" "$wf" "$state" "$k"
+        else printf '  %s✗%s %s is %s but %s says %s: xal-factory apply\n' "$RED" "$RST" "$wf" "$state" "$k" "$want"; bad=1; fi
+      done < <(opt_rows | cut -f1)
+    fi
+  fi
+  printf '\n'
+  [ "$bad" = 0 ] && printf '%sNothing to fix.%s\n' "$GREEN" "$RST" || printf '%sSome of the above needs you.%s\n' "$YEL" "$RST"
+  return "$bad"
+}
+
+# --- init -------------------------------------------------------------------------------------
+ANS=""
+ans_get() { awk -F'\t' -v k="$1" '$1 == k { print $2; exit }' "$ANS"; }
+ans_set() { local t; t="$(mktemp)"; awk -F'\t' -v k="$1" -v v="$2" 'BEGIN { OFS = "\t" } $1 == k { $2 = v } { print }' "$ANS" > "$t" && mv "$t" "$ANS"; }
+cmd_init() {
+  local name="" owner="" dir="" create="" k v d choices
+  local -a sets=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes|-y) YES=1; shift ;;
+      --name) name="${2:-}"; shift 2 ;;
+      --owner) owner="${2:-}"; shift 2 ;;
+      --dir) dir="${2:-}"; shift 2 ;;
+      --create-remote) create=1; shift ;;
+      --set) sets+=("${2:-}"); shift 2 ;;
+      *) die "unknown argument to init: $1" 2 ;;
+    esac
+  done
+
+  printf '\n%sXal Software Factory %s%s: setup\n' "$BOLD" "$VERSION" "$RST"
+  say "Every question has a default; press Enter to take it. Each answer tells you how to change it later."
+  interactive || say "${DIM}(no terminal or --yes: taking every default)${RST}"
+
+  head1 "Prerequisites"
+  for k in git bash; do command -v "$k" >/dev/null 2>&1 || die "$k is required"; done
+  # The seeders commit, so git needs an identity. A fresh machine has none.
+  if ! git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+    if interactive; then
+      say "  git has no identity on this machine, and the seeders commit."
+      k="$(ask_text "  Name to commit as" "")"; v="$(ask_text "  Email to commit as" "")"
+      [ -n "$k" ] && [ -n "$v" ] || die "a name and an email are needed to commit"
+      if ask_yes "  Save them globally (git config --global)?" y; then git config --global user.name "$k" && git config --global user.email "$v"
+      else export GIT_AUTHOR_NAME="$k" GIT_AUTHOR_EMAIL="$v" GIT_COMMITTER_NAME="$k" GIT_COMMITTER_EMAIL="$v"; fi
+    else
+      die "git has no identity, and the seeders commit. Run: git config --global user.name \"Your Name\" && git config --global user.email you@example.com" 2
+    fi
+  fi
+  printf '  %s✔%s git identity: %s\n' "$GREEN" "$RST" "$(git var GIT_AUTHOR_IDENT | sed 's/ [0-9]* [+-][0-9]*$//')"
+  for k in gh claude jq python3; do
+    command -v "$k" >/dev/null 2>&1 && printf '  %s✔%s %s\n' "$GREEN" "$RST" "$k" || printf '  %s·%s %s not found: needed later (xal-factory doctor says what for)\n' "$YEL" "$RST" "$k"
+  done
+
+  head1 "The factory"
+  [ -n "$owner" ] || owner="$(gh api user --jq .login 2>/dev/null || true)"
+  owner="$(ask_text "GitHub owner (user or organization) for the factory's repos" "${owner:-you}")"
+  name="$(ask_text "Factory name (names the ops repo and the status file)" "${name:-factory}")"
+  local ops_name="$name-ops"
+  ops_name="$(ask_text "Ops repo name (specs, status, the cost ledger, the idea inbox)" "$ops_name")"
+  dir="$(ask_text "Where to create it locally" "${dir:-$PWD}")"
+  local ops_repo="$owner/$ops_name"
+  later "the ops repo is factory.ops_repo in each service's .xal/factory.conf"
+
+  # Answers, starting from the registry's defaults, then --set overrides. A file of
+  # key<TAB>value lines rather than an associative array: macOS still ships bash 3.2.
+  ANS="$(mktemp)"; trap 'rm -f "$ANS"' EXIT
+  opt_rows | cut -f1,2 > "$ANS"
+  for v in "${sets[@]+"${sets[@]}"}"; do
+    k="${v%%=*}"; opt_known "$k" || die "--set names an unknown option: $k" 2
+    opt_valid "$k" "${v#*=}" || die "--set $v: not a valid value (choices: $(opt_field "$k" 3))" 2
+    ans_set "$k" "${v#*=}"
+  done
+
+  head1 "How the factory runs"
+  say "Defaults are the safe choice: the driver builds a session only when you dispatch it, nothing chains, nothing merges without you."
+  while IFS=$'\t' read -r k d choices _scope _apply ask what lat; do
+    [ "$ask" = yes ] || continue
+    [ "$k" = factory.ops_repo ] && continue
+    printf '\n%s%s%s  %s%s%s\n' "$BOLD" "$k" "$RST" "$DIM" "$what" "$RST"
+    case "$choices" in
+      '*'|int) v="$(ask_text "  value" "$(ans_get "$k")")"
+               while ! opt_valid "$k" "$v"; do printf '  %snot valid for %s%s\n' "$RED" "$k" "$RST"; v="$(ask_text "  value" "$(ans_get "$k")")"; done ;;
+      *)       v="$(ask_choice "  $k" "$(ans_get "$k")" "$choices")" ;;
+    esac
+    ans_set "$k" "$v"
+    printf '  %s→%s %s\n' "$GREEN" "$RST" "$v"
+    later "$lat"
+  done < <(opt_rows)
+
+  head1 "Seeding the ops repo"
+  local dest="$dir/$ops_name"
+  [ -e "$dest" ] && die "$dest already exists: pick another --dir or name" 2
+  bash "$FACTORY_ROOT/scaffold/seed-ops.sh" --name "$name" --dest "$dest" >/dev/null || die "seed-ops.sh failed (run it by hand to see why: $FACTORY_ROOT/scaffold/seed-ops.sh --name $name --dest $dest)"
+  # The profile: every answer that differs from its default, and the ops repo's own name.
+  conf_put "$dest/.xal/factory.conf" factory.ops_repo "$ops_repo"
+  local changed=0
+  while IFS=$'\t' read -r k d _; do
+    [ "$k" = factory.ops_repo ] && continue
+    if [ "$(ans_get "$k")" != "$d" ]; then conf_put "$dest/.xal/factory.conf" "$k" "$(ans_get "$k")"; changed=$((changed + 1)); fi
+  done < <(opt_rows)
+  ( cd "$dest" && git add -A && git -c commit.gpgsign=false commit -q -m "chore: the factory profile, from xal-factory init" ) >/dev/null 2>&1
+  printf '  %s✔%s %s  %s(%s option(s) differ from the defaults)%s\n' "$GREEN" "$RST" "$dest" "$DIM" "$changed" "$RST"
+  mkdir -p "$STATE_DIR" && printf 'OPS_DIR=%s\nOPS_REPO=%s\n' "$dest" "$ops_repo" > "$STATE"
+  later "the profile is $dest/.xal/factory.conf; \`xal-factory config set\` inside that repo"
+
+  head1 "GitHub"
+  if [ -n "$create" ] || ask_yes "Create $ops_repo on GitHub now (private) and push?" n; then
+    if ( cd "$dest" && gh repo create "$ops_repo" --private --source . --remote origin --push >/dev/null ); then
+      printf '  %s✔%s created and pushed %s\n' "$GREEN" "$RST" "$ops_repo"
+      if [ "$(ans_get ops.idea_inbox)" = on ]; then
+        ( cd "$dest" && gh label create ideas --force >/dev/null 2>&1; n="$(gh issue create --title 'Idea inbox' --label ideas --body 'One idea per comment. Triaged at the weekly review.' 2>/dev/null | grep -oE '[0-9]+$')"; [ -n "$n" ] && gh issue pin "$n" >/dev/null 2>&1 ) && printf '  %s✔%s opened and pinned the idea inbox\n' "$GREEN" "$RST"
+      fi
+      ( cd "$dest" && cmd_apply >/dev/null 2>&1 ) || true
+    else
+      printf '  %s✗%s could not create %s; run it yourself:\n' "$RED" "$RST" "$ops_repo"
+      printf '  %s$ cd %s && gh repo create %s --private --source . --remote origin --push%s\n' "$CYAN" "$dest" "$ops_repo" "$RST"
+    fi
+  else
+    printf '  Run when ready:\n  %s$ cd %s && gh repo create %s --private --source . --remote origin --push%s\n' "$CYAN" "$dest" "$ops_repo" "$RST"
+    [ "$(ans_get ops.idea_inbox)" = on ] && printf '  %s$ gh label create ideas && gh issue create --title "Idea inbox" --label ideas --body "One idea per comment."%s\n' "$CYAN" "$RST"
+  fi
+
+  head1 "Summary"
+  while IFS=$'\t' read -r k d _; do
+    [ "$k" = factory.ops_repo ] && v="$ops_repo" || v="$(ans_get "$k")"
+    v="${v//<VERSION>/$VERSION}"; d="${d//<VERSION>/$VERSION}"
+    if [ "$v" = "$d" ]; then printf '  %-28s %s %s(default)%s\n' "$k" "$v" "$DIM" "$RST"; else printf '  %-28s %s%s%s\n' "$k" "$BOLD" "$v" "$RST"; fi
+  done < <(opt_rows)
+  head1 "Next"
+  say "  1. Research and write the first spec, then admit it: $dest/specs/README.md"
+  say "  2. Seed its service:       xal-factory seed <service-name>"
+  say "  3. Check everything:       xal-factory doctor"
+  say "  Every option, explained:   xal-factory config explain"
+}
+
+# --- seed -------------------------------------------------------------------------------------
+cmd_seed() {
+  local name="" lang="" module="" dest="" adr="" ops_dir="" ops_repo="" profile
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --lang) lang="${2:-}"; shift 2 ;;
+      --module) module="${2:-}"; shift 2 ;;
+      --dest) dest="${2:-}"; shift 2 ;;
+      --adr) adr="${2:-}"; shift 2 ;;
+      --ops) ops_dir="${2:-}"; shift 2 ;;
+      --yes|-y) YES=1; shift ;;
+      -*) die "unknown argument to seed: $1" 2 ;;
+      *) name="$1"; shift ;;
+    esac
+  done
+  [ -n "$name" ] || die "usage: xal-factory seed <service-name> [--lang <l>] [--module <path>] [--dest <dir>] [--ops <ops-repo-dir>]" 2
+  if [ -z "$ops_dir" ] && [ -f "$STATE" ]; then ops_dir="$(sed -n 's/^OPS_DIR=//p' "$STATE")"; fi
+  [ -n "$ops_dir" ] && [ -f "$ops_dir/.xal/factory.conf" ] || die "no factory profile: pass --ops <ops-repo-dir>, or run \`xal-factory init\` first" 2
+  profile="$ops_dir/.xal/factory.conf"
+  ops_repo="$(sed 's/#.*//' "$profile" | awk -F= '{ k = $1; gsub(/[ \t]/, "", k) } k == "factory.ops_repo" { v = $2; gsub(/[ \t]/, "", v); print v }')"
+  if [ -z "$lang" ]; then
+    lang="$(sed 's/#.*//' "$profile" | awk -F= '{ k = $1; gsub(/[ \t]/, "", k) } k == "stack.default_lang" { v = $2; gsub(/[ \t]/, "", v); print v }')"
+    [ -n "$lang" ] || lang="$(opt_field stack.default_lang 2)"
+    say "Language: ${BOLD}$lang${RST}, pre-selected by stack.default_lang. The decision is still the service's first ADR (docs/adr/0001-stack-selection.md)."
+    later "pass --lang <language>, or xal-factory config set stack.default_lang <language> in the ops repo"
+  fi
+  dest="${dest:-$(dirname "$ops_dir")/$name}"
+  local -a args=(--name "$name" --lang "$lang" --dest "$dest" --profile "$profile")
+  [ -n "$ops_repo" ] && args+=(--ops-repo "$ops_repo")
+  [ -n "$module" ] && args+=(--module "$module")
+  [ -n "$adr" ] && args+=(--adr "$adr")
+  bash "$FACTORY_ROOT/scaffold/seed-service.sh" "${args[@]}" || exit $?
+  head1 "Switches for this service, from the factory profile"
+  ( cd "$dest" && cmd_apply --dry-run )
+  say "  Once the repo is pushed, \`xal-factory apply\` inside it runs these for you."
+}
+
+usage() {
+  sed -n '3,12p' "$SELF" | sed 's/^# \{0,1\}//'
+  printf '\nVersion %s, from %s\n' "$VERSION" "$FACTORY_ROOT"
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  init)    cmd_init "$@" ;;
+  seed)    cmd_seed "$@" ;;
+  config)  cmd_config "$@" ;;
+  enable)  cmd_toggle on "$@" ;;
+  disable) cmd_toggle off "$@" ;;
+  apply)   cmd_apply "$@" ;;
+  doctor)  cmd_doctor ;;
+  version|--version) printf 'xal-factory %s\n' "$VERSION" ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 2 ;;
+esac

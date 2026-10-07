@@ -90,6 +90,15 @@ reconstructing the shape from prose.
   gate input, no lowered coverage floor, no deleted or skipped test, no file outside
   `scope_in`.
 - `retry_cap` is an integer, and `on_exhaustion` is always `escalate`. Never `continue`.
+- **The factory's defaults fill four values, and the owner's approval of the plan is what makes
+  them final.** Read them in the service repo with `scripts/driver/config.sh --get <key>`:
+  `spend_ceiling_usd` from `plan.spend_ceiling_usd`, `session_ceiling_usd` from
+  `plan.session_ceiling_usd`, each session's `retry_cap` from `plan.retry_cap`, and
+  `autonomy_level` from `pipeline.auto_merge`. When `pipeline.auto_merge` is `off`, write
+  `autonomy_level: code-only` and say in the plan that merge.yml is disabled, so nothing
+  merges unattended: the driver refuses `unset`, and `off` is enforced by the workflow being
+  off, not by the level. A value you change from its default is stated in the plan with the
+  reason, so the owner sees it at approval.
 - `human_only_actions_before` lists every item from the spec's human-only section that gates
   this session, by its id. A human-only action that gates a session and is not listed here
   has stopped gating anything.
