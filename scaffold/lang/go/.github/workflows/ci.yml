@@ -35,7 +35,7 @@ jobs:
       # ORDERING MATTERS — this runs SECOND and into its own `path` so it cannot clobber the
       # service checkout above (a second checkout without `path` cleans and takes over the
       # workspace root). The path must stay INSIDE the workspace; actions/checkout rejects
-      # paths above it, which is why this is `.xal-process` and not `../xal-engineering-process`.
+      # paths above it, which is why this is `.xal-process` and not `../xal-factory`.
       #
       # The process repo is public, so no token is needed. Unpinned on purpose — this takes
       # the process default branch at HEAD, which is what makes "the spec moved and this
@@ -45,7 +45,7 @@ jobs:
       - name: Check out the process spec
         uses: actions/checkout@v4
         with:
-          repository: xodeeq/xal-engineering-process
+          repository: xodeeq/xal-factory
           path: .xal-process
 
       # Input for gates 1-7. The version comes from go.mod's `toolchain` directive, so the
@@ -68,7 +68,7 @@ jobs:
 
       # The whole Definition of Done, in one place. The runner has Docker, so the image-build
       # gate runs here too. XAL_PROCESS_DIR points the drift gate at the checkout above
-      # instead of the local-dev default of ../xal-engineering-process; it is relative
+      # instead of the local-dev default of ../xal-factory; it is relative
       # because check.sh cd's to the repo root before running any gate.
       - name: Run gates (scripts/check.sh)
         env:

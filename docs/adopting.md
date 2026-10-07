@@ -9,7 +9,7 @@ review sees it.
 From your repo root, with this repo cloned as a sibling:
 
 ```bash
-../xal-engineering-process/sync/process-sync.sh ../xal-engineering-process
+../xal-factory/sync/process-sync.sh ../xal-factory
 ```
 
 This writes `docs/process/` and `sync.config`. Commit the result. Add a `docs/process/README.md`
@@ -26,7 +26,7 @@ workflow call the script. Put the gates in the process's order
 "$XAL_PROCESS_DIR/sync/process-sync.sh" "$XAL_PROCESS_DIR" --check
 ```
 
-with `XAL_PROCESS_DIR` defaulting to `../xal-engineering-process` and CI checking this repo
+with `XAL_PROCESS_DIR` defaulting to `../xal-factory` and CI checking this repo
 out into `.xal-process`. `scaffold/lang/go/scripts/check.sh` is the model, including the
 "skip locally, mandatory under `CI=true`" shape for gates whose tool may be absent.
 
@@ -53,7 +53,7 @@ Call the harness from CI as a separate step after the gate.
   laws, the gate command, and the open design decisions. `scaffold/common/CLAUDE.md.template`
   is the shape.
 - Optionally, `.claude/settings.json` from `scaffold/common/.claude/` to enable the
-  `xal-process` plugin, which supplies `/begin-session` and `/wrap-session`.
+  `xal-factory` plugin, which supplies `/begin-session` and `/wrap-session`.
 
 Write the first handoff, `docs/sessions/01.md`, describing the adoption itself. The next
 session reads it first.

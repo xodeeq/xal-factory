@@ -47,7 +47,7 @@ seed-service.sh    the seeder
 | Path | Purpose |
 |---|---|
 | `common/CLAUDE.md.template` | the repo's living-source-of-truth skeleton: the start-here ritual, the placeholders a session must decide deliberately |
-| `common/.claude/settings.json` | registers this repo's plugin marketplace and enables `xal-process` (the `/begin-session` and `/wrap-session` commands, the concept-note and service-conventions skills). Optional: the process is followable without an agent |
+| `common/.claude/settings.json` | registers this repo's plugin marketplace and enables `xal-factory` (the `/begin-session` and `/wrap-session` commands, the concept-note and service-conventions skills). Optional: the process is followable without an agent |
 | `common/.github/workflows/claude*.yml` | the Claude GitHub App workflows — inert until the App is installed, which is why they ship at seeding: the install has something to activate. Delete if unused |
 | `common/docs/spec/`, `common/docs/plan/` | where the service spec (or a pointer to it) and the multi-session build plan live. Seeded as real directories: a path a session writes to is part of the seed |
 | `common/docs/{adr,concepts,briefs,sessions}/`, `docs/lessons.md` | the decision log, curriculum, ephemeral briefs, handoffs, improvement ledger |

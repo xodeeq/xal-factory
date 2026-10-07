@@ -1,4 +1,4 @@
-# The Xal Engineering Process — principles
+# The Xal Software Factory — principles
 
 These are decision rules, not slogans. Each one tells you what to do differently, and each
 one was written down after the alternative was tried. The spec under [`spec/`](spec/) is

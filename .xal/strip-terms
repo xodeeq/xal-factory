@@ -1,0 +1,25 @@
+# .xal/strip-terms — terms that belong to the product this factory was extracted from, and
+# must never ship in it. Read by gate 8 in scripts/check.sh as one ERE per line, matched
+# case-insensitively as whole words across every tracked file.
+#
+# WHY: everything here is lifted by hand from a private estate (docs/lift-ledger.md). The
+# failure this gate exists for is quiet: a unit name, a person or a private credential name
+# left in a lifted script reads fine to its author, because it is true at home, and ships to
+# every adopter. "Xal" itself is the brand and is allowed.
+#
+# Closed list. Add a line when a term leaks or plausibly would, never remove one without a
+# lift-ledger note saying why it is now safe.
+
+# the product's units (repositories)
+xal-(auth|org|invoicing|notify|app|company|platform|site|onboarding|contacts|workspace)
+# the operating layer and its plugin
+xcos(-core)?
+# the person at the gates; adopters name their own with factory.escalation_label
+sodiq
+needs-sodiq
+# private credential names (adopters get FACTORY_* names)
+XAL_(READ|PROJECT)_TOKEN
+# product requirement and decision ids
+ORG-FR-?[0-9]*
+# personal locale
+lagos

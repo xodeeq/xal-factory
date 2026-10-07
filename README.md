@@ -1,4 +1,4 @@
-# Xal Engineering Process
+# Xal Software Factory
 
 **A language-agnostic engineering process you can clone and build on: a spec every repo
 vendors, a scaffold that seeds a new repo with a working gate, and the discipline that keeps
@@ -20,7 +20,7 @@ decisions rather than preferences.
 | [`spec/`](spec/) | The canonical spec a repo vendors: the lifecycle guide, the service and deployment contracts, the gate discipline, ADRs, concept notes, the session ritual. |
 | [`scaffold/`](scaffold/) | `seed-service.sh` and the `common/` + `lang/<language>/` trees it seeds from. A seeded repo arrives with its gate, its CI, its declared inputs and its failing fixtures. Go is the first language overlay. |
 | [`sync/`](sync/) | How a repo vendors the spec and how drift becomes a red gate instead of a silent divergence. |
-| [`plugins/xal-process`](plugins/xal-process/) | For Claude Code users: `/begin-session`, `/wrap-session`, the concept-note skill and the service-conventions skill. Optional; the process needs no agent. |
+| [`plugins/xal-factory`](plugins/xal-factory/) | For Claude Code users: `/begin-session`, `/wrap-session`, the concept-note skill and the service-conventions skill. Optional; the process needs no agent. |
 | [`adr/`](adr/) | This repo's own decisions: the sync model, seeding, the plugin boundary, declared gate inputs. |
 | [`scripts/check.sh`](scripts/check.sh) | This repo's own gate. CI runs this exact script, and [`gates/check.test.sh`](gates/check.test.sh) proves each of its gates can fail. |
 
@@ -29,8 +29,8 @@ decisions rather than preferences.
 **Seed a new service** (the whole point):
 
 ```bash
-git clone https://github.com/xodeeq/xal-engineering-process.git
-xal-engineering-process/scaffold/seed-service.sh \
+git clone https://github.com/xodeeq/xal-factory.git
+xal-factory/scaffold/seed-service.sh \
     --name orders --lang go --module github.com/you/orders --dest ./orders
 cd orders && ./scripts/check.sh      # the gate; some gates skip locally without their tool
 ```
@@ -45,8 +45,8 @@ script, and add a fixture harness.
 **Use the Claude Code plugin** in any repo (a seeded repo has this already):
 
 ```bash
-claude plugin marketplace add xodeeq/xal-engineering-process
-claude plugin install xal-process@xal-engineering-process
+claude plugin marketplace add xodeeq/xal-factory
+claude plugin install xal-factory@xal-factory
 ```
 
 ## The shape of a conforming repo

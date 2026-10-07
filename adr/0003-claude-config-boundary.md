@@ -31,7 +31,7 @@ Applied:
 
 | Plugin-distributed core (shared, one-way) | Repo-owned overlay (local, owned) |
 |---|---|
-| the session ritual commands, the concept-note skill, the service-conventions skill (`xal-process`) | the repo's `CLAUDE.md`: bounded context, stack, ADR index, the gate command |
+| the session ritual commands, the concept-note skill, the service-conventions skill (`xal-factory`) | the repo's `CLAUDE.md`: bounded context, stack, ADR index, the gate command |
 | language-agnostic agent definitions, when they exist | language-specific agent definitions and commands |
 
 **Sync is one-way.** Shared behaviour changes by a PR against this repo, never by editing an

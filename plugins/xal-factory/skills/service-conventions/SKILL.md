@@ -1,6 +1,6 @@
 ---
 name: service-conventions
-description: The language-agnostic contract every service under the Xal Engineering Process must satisfy, and the gate discipline that enforces it. Consult whenever creating or modifying ANY part of a service repo — it defines the stable surface that makes services composable across languages.
+description: The language-agnostic contract every service under the Xal Software Factory must satisfy, and the gate discipline that enforces it. Consult whenever creating or modifying ANY part of a service repo — it defines the stable surface that makes services composable across languages.
 ---
 
 # Service conventions
@@ -39,7 +39,7 @@ because the drift check is a plain diff. A local edit cannot be reconciled; it o
 the gate red.
 
 To change a convention: change it in
-[`xal-engineering-process/spec/`](https://github.com/xodeeq/xal-engineering-process/tree/main/spec),
+[`xal-factory/spec/`](https://github.com/xodeeq/xal-factory/tree/main/spec),
 bump that repo's `VERSION` per its policy, then re-sync here and review the diff. This is
 one-way: the process is upstream of every repo, always.
 

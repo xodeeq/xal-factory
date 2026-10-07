@@ -3,7 +3,7 @@
 # check-gate-inputs.sh — assert that every caller of a repo's gate script supplies
 # every input that script's gates require.
 #
-# CANONICAL COPY: the process repo (xodeeq/xal-engineering-process, .xal/). Every seeded
+# CANONICAL COPY: the process repo (xodeeq/xal-factory, .xal/). Every seeded
 # repo runs a copy at .xal/check-gate-inputs.sh, because CI runs plain scripts and a plugin
 # is not resolvable from a plain `run:` step. Change it in the process repo and re-copy;
 # never edit a seeded copy in place. Rationale: spec/gate-discipline.md §4, ADR-0004.
@@ -23,7 +23,7 @@
 # The shared root cause is NOT that the setup is duplicated. It is that a gate's input
 # requirements are DISCOVERED BY EXECUTION rather than DECLARED AS DATA — and the
 # author's machine satisfies them ambiently (the sibling repo happens to be at
-# ../xal-engineering-process, `claude` happens to be on $PATH) while CI must satisfy each one by an
+# ../xal-factory, `claude` happens to be on $PATH) while CI must satisfy each one by an
 # explicit step. So the authoring environment is structurally incapable of revealing the
 # obligation CI will enforce, and there is no artifact for a caller to be checked
 # against. A guardrail ("grep every caller before pushing") is a memory aid attached to
