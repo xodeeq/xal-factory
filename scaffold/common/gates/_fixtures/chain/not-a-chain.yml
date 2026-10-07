@@ -1,0 +1,32 @@
+# The corrected shape: main is judged before anything is built on it, the dispatch carries a
+# credential that can actually trigger work, nothing merges, and an escalation halts.
+name: Chain
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to chain onto a red or unjudged main
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+          for _ in $(seq 1 24); do
+            concl="$(gh api "repos/x/y/commits/$sha/check-runs" --jq '.check_runs[].conclusion')"
+            [ -n "$concl" ] && break
+            sleep 30
+          done
+      - name: Dispatch the driver for the selected session
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+  retry-or-escalate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retry within the cap, or escalate and stop
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+          ./scripts/driver/plan-write.sh --plan "$PLAN" --session "$SESSION" --status escalated
+          exit 1

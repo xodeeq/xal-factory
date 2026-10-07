@@ -1,0 +1,3 @@
+a1b2c3d claude[bot]: test(slug): FX-FR-01 lowercases and hyphenates (RED)
+b2c3d4e claude[bot]: feat(slug): FX-FR-01 and FX-FR-02 (GREEN)
+e5f6a7b claude[bot]: chore(plan): S1 status=passed, written by the driver

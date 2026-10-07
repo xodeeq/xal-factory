@@ -1,0 +1,788 @@
+# driver.yml: runs EXACTLY ONE session of the approved plan headless, opens the PR, runs the
+# gate, writes status and evidence into docs/plan/plan.md, and STOPS. It never merges
+# anything. The decision is ADR-0007 in the factory (adr/0007-pipeline-driver.md).
+#
+# WHAT BOUNDS THE SPEND, AND WHAT EACH BOUND ACTUALLY STOPS ------------------------------
+#
+# An agent on a trigger is an unbounded spend surface, so it is bounded IN THE WORKFLOW,
+# where a limit actually stops something, rather than in a field recorded afterwards. One
+# line each, honestly:
+#
+#   workflow_dispatch only  stops the driver ever starting itself. A person or chain.yml
+#                           starts every run; there is no schedule and no merge trigger.
+#   timeout-minutes: 90     stops a hung run. Stops NO spend already incurred. Cost is per
+#                           token, not per minute: the bound that limits spend is the turn
+#                           cap, and the wall clock only decides whether a run that is
+#                           already paid for may finish. It was first set at 45 and destroyed
+#                           paid work (a session cancelled mid-gate after the agent had
+#                           finished). 90 is about 1.6x the longest run measured at the
+#                           200-turn cap, so it still catches a genuine hang.
+#   --max-turns             stops an agent looping. Does NOT bound one expensive turn. Read
+#                           from budget.driver_max_turns (default 200). It is a loop guard,
+#                           not a budget: at 120 it was failing honest sessions rather than
+#                           catching runaway ones.
+#   concurrency group       stops two runs racing on one session branch. Bounds nothing
+#                           inside a run.
+#   the two ceilings        `spend_ceiling_usd` and `session_ceiling_usd` in the plan, checked
+#                           against the ledger before the agent starts. They bound spend to
+#                           `ceiling + one session`, never `ceiling` (see that step).
+#
+# THE GATE-INPUT CONTRACT. READ BEFORE EDITING ANY STEP BELOW ---------------------------
+#
+# This workflow is a CALLER of scripts/check.sh, so gate 0 asserts it supplies every input
+# .xal/gate-inputs declares: the language's toolchain and gate tooling
+# (`./.github/actions/toolchain`, the language overlay's one action) and a process-spec
+# checkout with XAL_PROCESS_DIR. Removing either step fails gate 0 locally, before push.
+#
+# THIS FILE KNOWS NO LANGUAGE. It is seeded from the scaffold's common tree, and everything
+# language-specific (which toolchain, which linter, which pins) is behind the composite
+# action above, which the language overlay ships. That is what lets one driver drive a
+# service in any language, and what lets step-order.sh assert the toolchain is
+# re-established after the agent without knowing what a toolchain is.
+#
+# AND IT HAD TO BE MADE VISIBLE ON PURPOSE. Caller discovery is a TEXTUAL grep of these
+# files for `scripts/check.sh`. The agent runs the gate from inside its own prompt, which no
+# grep can see, so a driver that only ran the agent would be an undiscovered caller of a
+# gate needing inputs nothing obliged it to supply. The explicit gate step below fixes that
+# twice over: it makes this file a discovered caller, AND it makes the gate result the
+# WORKFLOW's rather than the agent's self-report.
+#
+# CONFIGURATION. Every value an adopter may change is read from .xal/factory.conf by
+# scripts/driver/config.sh in the step after checkout, which exports FACTORY_* variables to
+# every later step and publishes the ones a `with:` needs as step outputs.
+#
+# WHAT THIS WORKFLOW MAY NOT DO. Merge anything (merge.yml's job). Start another session
+# (chain.yml's job). Deploy, or touch deploy.yml. Write to main. Edit any session's scope,
+# artifacts, gate or prompt: the plan is approved, and amendments are separate PRs the owner
+# merges.
+name: Driver
+
+# THE SESSION ID GOES IN THE RUN NAME, AND IT IS LOAD-BEARING RATHER THAN COSMETIC.
+#
+# A `workflow_run` event carries `head_branch` and `display_title` and NOT the inputs that
+# started the run. chain.yml's retry job needs to know which session a finished run was, and
+# on 2026-09-22 it read `head_branch` — which for a dispatched run is the ref it was dispatched
+# ON, i.e. `main`, never the session branch the driver creates later. So the retry path could
+# not identify ANY session and refused every time; retry and escalation were unreachable.
+#
+# `run-name` is evaluated with the `inputs` context and lands in the event as `display_title`,
+# so this is the one place the session id survives from dispatch to the chain.
+run-name: Driver — ${{ inputs.session }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      session:
+        description: 'Session id from docs/plan/plan.md, e.g. S1'
+        required: true
+        type: string
+      model:
+        description: 'Model for this run only. Empty uses models.driver from .xal/factory.conf; see the note in this file before overriding it.'
+        required: false
+        default: ''
+        type: string
+
+# One run per session. Never cancel-in-progress: a half-run session leaves a branch and a
+# PR behind, and cancelling one mid-flight is how you get a plan whose status says
+# `running` forever.
+concurrency:
+  group: driver-${{ github.repository }}-${{ inputs.session }}
+  cancel-in-progress: false
+
+# Least privilege per workflow. contents: write to push the
+# session branch; pull-requests: write to open the PR; id-token for the action. Nothing
+# else, and notably NOT the ability to merge, which is merge.yml's alone.
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  run-session:
+    name: Run one plan session headless
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      PLAN: docs/plan/plan.md
+      SESSION: ${{ inputs.session }}
+      XAL_PROCESS_DIR: .xal-process
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The factory configuration, read once. FACTORY_* go to $GITHUB_ENV for every later
+      # shell step; the values a `with:` input needs are also step outputs. A conf that sets an
+      # unknown key, or leaves factory.ops_repo unset, stops the run here (exit 2) rather than
+      # letting a misspelt setting fall back to a default that reads as configured.
+      #
+      # The spend ledger lives in the ops repo at ops.ledger_path, beside status/current.md,
+      # because it is the same kind of thing: cross-session state that outlives any one
+      # repo's build. It is fetched to a temp path so nothing in this tree can be mistaken for
+      # the record.
+      - name: Read the factory configuration
+        id: cfg
+        run: |
+          set -euo pipefail
+          ./scripts/driver/config.sh --emit | tee -a "$GITHUB_ENV"
+          {
+            printf 'driver_model=%s\n' "$(./scripts/driver/config.sh --get models.driver)"
+            printf 'driver_max_turns=%s\n' "$(./scripts/driver/config.sh --get budget.driver_max_turns)"
+            printf 'process_repo=%s\n' "$(./scripts/driver/config.sh --get factory.process_repo)"
+          } >> "$GITHUB_OUTPUT"
+
+      # THE PLAN MUST BE THE ONE ON THE DEFAULT BRANCH. Only an approved plan on main may be
+      # executed. Reading the plan from any other ref would let a
+      # branch approve its own plan by editing two frontmatter fields — the approval gate
+      # routed around by the thing it gates.
+      #
+      # Exit 3 here is the same REFUSED code preflight.sh uses, for the same reason: a
+      # deliberate decision must not be readable as a crash (1, 2 and 127 are what bash
+      # exits when it falls over).
+      - name: Refuse any ref but the default branch
+        run: |
+          if [ "$GITHUB_REF_NAME" != "${{ github.event.repository.default_branch }}" ]; then
+            printf 'REFUSED: the plan must be read from %s, not %s\n' \
+              "${{ github.event.repository.default_branch }}" "$GITHUB_REF_NAME"
+            printf '::error title=Driver refused::the plan must be read from the default branch\n'
+            exit 3
+          fi
+          printf 'reading the plan from %s\n' "$GITHUB_REF_NAME"
+
+      # FAIL CLOSED, BEFORE ANYTHING EXISTS. Nothing is committed, no branch is created and
+      # no PR is opened until this passes. Exit 3 = refused (named), 2 = unparseable.
+      - name: Preflight — may this session run at all?
+        run: ./scripts/driver/preflight.sh --plan "$PLAN" --session "$SESSION"
+
+      - name: Create the session branch
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          slug="$(printf '%s' "$SESSION" | tr '[:upper:]' '[:lower:]')"
+          branch="plan/${plan_id}/${slug}"
+
+          # A git ref and a directory cannot share a path, so an existing
+          # `plan/<plan-id>` — which is exactly what the planner named ITS branch — makes
+          # `plan/<plan-id>/s1` impossible on the remote, and `ls-remote` on the exact ref
+          # sees nothing because the conflict is one level up. The rule lives in a script
+          # rather than here so the fixture suite can prove it, including the negative
+          # case that matters: a sibling `…/s2` must NOT block `…/s1`, or the chain
+          # would refuse its own second session.
+          # IS THIS A RETRY? The ledger is the answer, because it holds one record per RUN.
+          # A session with attempts already recorded is being tried again, and a retry is
+          # allowed to reuse its own branch — see below for why it could not before.
+          mkdir -p "$RUNNER_TEMP/spend"
+          LEDGER="$RUNNER_TEMP/spend/costs.jsonl"
+          if gh api "repos/$FACTORY_OPS_REPO/contents/$FACTORY_OPS_LEDGER_PATH" --jq '.content' 2>/dev/null \
+               | base64 -d > "$LEDGER" 2>/dev/null; then :; else rm -f "$LEDGER"; fi
+          prior="$(./scripts/driver/spend.sh --file "$LEDGER" --attempts \
+                     --plan-id "$plan_id" --session "$SESSION" 2>/dev/null || printf '0')"
+
+          retry_flag=""
+          [ "${prior:-0}" -gt 0 ] && retry_flag="--retry"
+
+          git ls-remote --heads origin \
+            | ./scripts/driver/branch-check.sh --branch "$branch" --refs - $retry_flag
+
+          # A RETRY RESETS ITS BRANCH TO THE BASE RATHER THAN CONTINUING FROM THE WRECKAGE.
+          #
+          # Attempt 1 creates this branch at this very step, so before this rule EVERY retry
+          # of a real session hit "the branch already exists" and was refused in seconds, and
+          # retry_cap was unreachable: three attempts once died here in under a minute
+          # without an agent ever starting.
+          #
+          # Reset, not reuse: a retry means "try this session again", and an agent inheriting a
+          # broken tree it did not create would be gated on a mixture of two attempts, where a
+          # green verdict cannot be attributed to either. The failed attempt is not lost — the
+          # driver bundles and uploads it on every failure, which is what that net exists for.
+          if [ -n "$retry_flag" ]; then
+            printf '::warning title=Driver::%s attempt %s — resetting %s to %s; the previous attempt survives only in its own run bundle\n' \
+              "$SESSION" "$((prior + 1))" "$branch" "$BASE"
+            git switch -c "$branch"
+            git push -q --force-with-lease origin "HEAD:refs/heads/$branch" || \
+              git push -q --force origin "HEAD:refs/heads/$branch"
+          else
+            git switch -c "$branch"
+          fi
+          printf 'BRANCH=%s\n' "$branch" >> "$GITHUB_ENV"
+
+          # Identity is set HERE, before the agent runs, so the driver's OWN commits
+          # carry it. It does NOT govern the agent's: claude-code-action overrides the git
+          # identity with its own, so the session's commits are authored by `claude[bot]`.
+          # That is left alone deliberately: `claude[bot]` is unmistakably a machine, which
+          # is the whole point of the provenance claim. Do not "fix" it back.
+          git config user.name  "<SERVICE> driver"
+          git config user.email "driver@factory.invalid"
+
+      # THE SESSION MUST BE ABLE TO READ THE SPEC IT IS BUILDING AGAINST.
+      #
+      # The first session ever driven shipped without it: its brief cited three requirement
+      # ids and the session could not open a word of any of them, because the admitted spec
+      # lives in the ops repo and the tool allowlist blocks the API read. It built from an ADR
+      # instead, very likely right, and very likely is not the standard a spec citation sets.
+      # Nothing in the gate can tell a clause satisfied from a clause never read.
+      #
+      # THE DRIVER FETCHES IT, NOT THE AGENT. Handing the agent the read would put a
+      # credential in the AGENT's tool surface rather than in the workflow around it, and
+      # worse once sessions auto-merge. Here the token is a workflow secret, the fetch
+      # happens before the agent starts, and the session just opens a local file.
+      #
+      # AND IT VERIFIES. A digest that differs from the plan's REFUSES rather than building
+      # against a document nobody approved.
+      #
+      # .xal-spec/ is gitignored, so `git add -A` cannot sweep the spec into a commit in a
+      # repo that does not own it.
+      - name: Fetch the admitted spec and verify it against the plan's digest
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_READ_TOKEN }}
+        run: ./scripts/driver/fetch-spec.sh --plan "$PLAN" --out .xal-spec/service.md
+
+      # The brief the agent receives is extracted from the approved plan, verbatim — it
+      # does not get the plan and choose its own scope. See scripts/driver/session-prompt.sh.
+      - name: Compose the session prompt from the approved plan
+        id: prompt
+        run: |
+          set -euo pipefail
+          ./scripts/driver/session-prompt.sh --plan "$PLAN" --session "$SESSION" \
+            --spec .xal-spec/service.md \
+            > "$RUNNER_TEMP/prompt.md"
+          printf '%s\n' "----- prompt begins -----"
+          cat "$RUNNER_TEMP/prompt.md"
+          printf '%s\n' "----- prompt ends -----"
+          {
+            printf 'text<<XAL_DRIVER_PROMPT_EOF\n'
+            cat "$RUNNER_TEMP/prompt.md"
+            printf 'XAL_DRIVER_PROMPT_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+      # ---- the declared gate inputs, supplied before the agent runs so it can run the
+      #      gate itself, and re-established after it for the explicit gate step below ----
+
+      # The process spec for the drift gate. The process repo is public, so no credential.
+      # Into its own path so it cannot clobber the service checkout, and .xal-process/ is
+      # gitignored, so `git add -A` below cannot sweep a second repository into a commit.
+      - name: Check out the process spec
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.cfg.outputs.process_repo }}
+          path: .xal-process
+
+      # The language overlay's action: the toolchain, pinned by the repo's own manifest, and
+      # the tools the gate script shells out to. Declared in .xal/gate-inputs with this
+      # action's path as the caller pattern.
+      - name: Resolve the toolchain and install the gate's tooling
+        uses: ./.github/actions/toolchain
+
+      # THE CEILINGS ARE CHECKED HERE, BEFORE THE EXPENSIVE STEP, AND THAT POSITION IS THE
+      # WHOLE POINT.
+      #
+      # Cost is per token, so nothing can stop a run that is already going — the same honest
+      # limit `timeout-minutes` has, argued out on 2026-09-19. What a ceiling can do is refuse
+      # to START the next thing, and the two bounds the plan carries are read against the
+      # ledger: `spend_ceiling_usd` per plan and `session_ceiling_usd` per session.
+      #
+      # IT IS IN THE DRIVER RATHER THAN IN THE CHAIN, deliberately. Bounding only the chained
+      # path would leave a hand dispatch unbounded, and the session that most wants stopping is
+      # the one someone re-runs "just once more" at 1am. Every path to the agent passes here.
+      #
+      # WHAT A "BEFORE" CHECK CAN AND CANNOT PROMISE, measured rather than assumed. One
+      # session cost $41.97 over two runs that both failed before their gate. Against a
+      # session bound of 45 a THIRD dispatch would have been PERMITTED, and the session could
+      # have reached ~$70 before anything refused.
+      #
+      # So the honest guarantee is: spend is bounded by `ceiling + one session`, never by
+      # `ceiling`. A check that runs before a session cannot know what that session will cost,
+      # and the only bound that could is one that kills a run mid-flight — which buys nothing,
+      # because the tokens are already paid for. Reading this as "a session cannot exceed its
+      # ceiling" would be reading it as a promise it cannot make.
+      #
+      # It is still the bound that did not exist when a failed attempt cost $20.87 inside every
+      # limit there was, and it is what makes a runaway terminate rather than compound.
+      #
+      # A refusal here is exit 3 and fails the job, which is correct: the run must not proceed,
+      # and a silent skip would be a ceiling that reports safe while spending.
+      - name: Fetch the spend ledger and check both ceilings
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          plan_ceiling="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm spend_ceiling_usd || true)"
+          session_ceiling="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm session_ceiling_usd || true)"
+
+          # $RUNNER_TEMP is an ordinary environment variable inside a run step. The
+          # `runner` CONTEXT it mirrors does not exist in a job-level env block, and using
+          # it there is what made this workflow undispatchable — see the note above the job.
+          LEDGER="$RUNNER_TEMP/spend/costs.jsonl"
+          mkdir -p "$RUNNER_TEMP/spend"
+          # A ledger that does not exist yet is not an error — a plan that has spent nothing
+          # has spent nothing. `gh api` failing for any other reason leaves no file, and
+          # spend.sh treats an absent file as zero, so this step cannot turn a network blip
+          # into a refusal. It also cannot turn one into a false green: the ledger is written
+          # after every run, so a persistent read failure shows up as a total that stops rising.
+          if gh api "repos/$FACTORY_OPS_REPO/contents/$FACTORY_OPS_LEDGER_PATH" --jq '.content' 2>/dev/null \
+               | base64 -d > "$LEDGER" 2>/dev/null; then
+            printf '  ledger fetched: %s line(s)\n' "$(wc -l < "$LEDGER" | tr -d ' ')"
+          else
+            printf '  no ledger in the ops repo yet: treating this plan as having spent nothing\n'
+            rm -f "$LEDGER"
+          fi
+
+          ./scripts/driver/spend.sh --file "$LEDGER" --check \
+            --plan-id "$plan_id" --session "$SESSION" \
+            --plan-ceiling "${plan_ceiling:-unset}" --session-ceiling "${session_ceiling:-unset}"
+
+      # THE TOOL ALLOWLIST IS LOAD-BEARING, AND ITS ABSENCE COST A WHOLE RUN.
+      #
+      # The first real driver run reported `"subtype": "success"`, `"is_error": false`, 53
+      # turns and $1.63, and changed NOTHING, because it also reported 26 permission
+      # denials. Without an explicit allowlist the agent could not write a file or run a
+      # command, so it spent the session being refused and then said it was done. That is
+      # the self-report failure produced by configuration rather than by the model, and it is
+      # why the commit step checks artifacts.
+      #
+      # DISALLOWED are the outward actions the driver reserves to itself. The agent works on
+      # a branch; pushing it, opening the PR and dispatching CI are the driver's, so an agent
+      # that did them would be doing the driver's job with the driver's credential and no
+      # gate in between.
+      #
+      # THE MODEL IS PINNED, and the default is the strongest one. PINNED AT ALL because the
+      # action's own default is the action's to change, and a driver whose behaviour moves
+      # when a dependency's default moves is not reproducible. STRONGEST BY DEFAULT because of
+      # what the gate cannot see: a test that passes without proving anything, a coverage
+      # floor set conveniently low, an assertion quietly narrowed to fit. Once auto-merge is
+      # on, the model and the reader are the only controls over that. A cheaper model costs
+      # roughly a fifth as much per session and is a deliberate quality trade, made in
+      # models.driver or for one run with the `model` dispatch input.
+      - name: Run the session headless
+        id: agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: >-
+            --max-turns ${{ steps.cfg.outputs.driver_max_turns }}
+            --model ${{ inputs.model || steps.cfg.outputs.driver_model }}
+            --allowedTools "Read,Glob,Grep,Write,Edit,MultiEdit,Bash,TodoWrite"
+            --disallowedTools "Bash(git push:*),Bash(gh pr:*),Bash(gh workflow:*),Bash(gh run:*),Bash(gh api:*),WebFetch,WebSearch"
+
+      # THE AGENT'S ACTION REVOKES ITS OWN TOKEN, AND TAKES THE PUSH CREDENTIAL WITH IT.
+      #
+      # `claude-code-action` installs a GitHub App token and, as the LAST internal step of
+      # its composite action, revokes it, inside the agent step and before anything here
+      # runs. `actions/checkout`'s `http.<host>/.extraheader` credential is left pointing at a
+      # token that no longer exists, so the FIRST push after the agent fails with
+      # `fatal: Authentication failed`. It cost a session once: 86 turns of committed work
+      # that existed only on a runner about to be destroyed. Hence an explicit RESTORE here,
+      # plus the bundle step at the end of this job so a failed push can never again destroy
+      # a session's work.
+      #
+      # AND IT RUNS ON FAILURE TOO. A session that hit the turn cap failed the agent step;
+      # this step was then skipped, the always() state write below ran, computed
+      # `status=failed`, and died on `git push`. The plan recorded nothing about a session
+      # that had just cost $20.87, and a retry would read "never attempted". A step that must
+      # always run needs everything it depends on to be at least as unconditional as itself.
+      #
+      # AND IT RESTORES FACTORY_WRITE_TOKEN, NOT GITHUB_TOKEN, FOR A REASON THAT IS NOT ABOUT
+      # PERMISSION. GITHUB_TOKEN can push here; what it cannot do is make the resulting commit
+      # one CI will judge. A `pull_request` run triggered by a GITHUB_TOKEN push is left
+      # `action_required`, created and never executed, and the LAST push in this job (the
+      # plan-status commit) is the PR head the merge decision reads. `action_required` is
+      # neither green nor red, so the merge would have nothing to read.
+      #
+      # NO WIDENING OF THE AGENT'S REACH: this step runs AFTER the agent step, so the token is
+      # never present while the agent can act, and the same secret is already in this job for
+      # the PR below. `scripts/driver/step-order.sh` asserts the two match.
+      - name: Restore the push credential the agent's action revoked
+        if: always()
+        run: |
+          set -euo pipefail
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          auth="$(printf 'x-access-token:%s' "${{ secrets.FACTORY_WRITE_TOKEN }}" | base64 -w0)"
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $auth"
+          # Prove it before the work depends on it: ls-remote is a read, but it is the
+          # same credential path the push will take.
+          git ls-remote --heads origin >/dev/null
+          printf '  push credential restored and proven against origin\n'
+
+      # WHAT THE AGENT WAS ACTUALLY ABLE TO DO, read from the run rather than from its
+      # summary. A denial storm and a lazy session both end with an unchanged working
+      # tree, and the fix for each is completely different — one is a config bug in this
+      # file, the other is a prompt or model problem. Without this step the next reader
+      # has to infer which from an empty diff, which is exactly what happened on the
+      # first run. Non-fatal on its own: the commit step is what fails an empty session.
+      - name: What the agent was permitted to do
+        id: usage
+        if: always()
+        continue-on-error: true
+        env:
+          EXEC_FILE: ${{ steps.agent.outputs.execution_file }}
+        run: |
+          if [ -z "${EXEC_FILE:-}" ] || [ ! -f "$EXEC_FILE" ]; then
+            printf '::warning title=Driver::no execution file from the agent step — turns, cost and denials are unknown for this run\n'
+            exit 0
+          fi
+          python3 - "$EXEC_FILE" <<'PY'
+          import json, sys
+          rec = None
+          with open(sys.argv[1]) as fh:
+              try:
+                  data = json.load(fh)
+              except json.JSONDecodeError:
+                  fh.seek(0)
+                  data = [json.loads(l) for l in fh if l.strip()]
+          for r in (data if isinstance(data, list) else [data]):
+              if isinstance(r, dict) and r.get("type") == "result":
+                  rec = r
+          if not rec:
+              print("::warning title=Driver::no result record in the execution file")
+              raise SystemExit(0)
+          turns   = rec.get("num_turns")
+          cost    = rec.get("total_cost_usd")
+          denials = rec.get("permission_denials_count", 0)
+          print(f"  turns: {turns}   cost(usd): {cost}   permission denials: {denials}")
+          # These go to the ledger in the step below. When they were printed and dropped,
+          # nothing could enforce a ceiling, because nothing knew what had been spent.
+          import os
+          out = os.environ.get("GITHUB_OUTPUT")
+          if out:
+              with open(out, "a") as fh:
+                  fh.write(f"turns={turns if turns is not None else 0}\n")
+                  fh.write(f"cost={cost if cost is not None else 0}\n")
+                  fh.write(f"denials={denials}\n")
+          if denials:
+              print(f"::error title=Driver::the agent was denied {denials} tool call(s) — "
+                    "its allowlist in driver.yml is wrong, and an empty session here is a "
+                    "CONFIG failure, not a model failure")
+          PY
+
+      # A session that changed nothing is a FAILED session, not a quiet success. It is the
+      # single most likely silent failure here — a run that starts, does nothing, and
+      # reports a confident summary (P4's named failure mode).
+      #
+      # TWO SHAPES OF "DID SOMETHING", because the agent may or may not commit for itself
+      # and the action's behaviour there is not something to bet a false failure on. An
+      # empty index with commits ahead of the base is the agent having committed; an empty
+      # index with NO commits ahead is the real emptiness. Collapsing those two into one
+      # `git diff --cached --quiet` check would have failed a perfectly good session and
+      # blamed the session for it.
+      - name: Commit the session's work
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            ahead="$(git rev-list --count "origin/$BASE..HEAD")"
+            if [ "$ahead" -gt 0 ]; then
+              printf 'the agent committed its own work (%s commit(s) ahead of %s); nothing left to stage\n' \
+                "$ahead" "$BASE"
+              git push origin "$BRANCH"
+              exit 0
+            fi
+            printf 'REFUSED: session %s produced no changes at all\n' "$SESSION"
+            printf '::error title=Driver::session %s produced no changes — an empty session is a failed one\n' "$SESSION"
+            exit 1
+          fi
+          slug="$(printf '%s' "$SESSION" | tr '[:upper:]' '[:lower:]')"
+          cat > "$RUNNER_TEMP/msg" <<MSG
+          feat($slug): plan session $SESSION, run headless by the driver
+
+          Written by the pipeline driver, not by hand. The brief was extracted
+          verbatim from docs/plan/plan.md on the default branch by
+          scripts/driver/session-prompt.sh, so the scope is the approved plan's and not
+          the agent's reading of it. The gate result is recorded in a follow-up commit
+          on this branch.
+
+          Driver run: $RUN_URL
+          MSG
+          # NOT `sed -i`: GNU sed takes the script next; BSD sed (macOS, the self-hosted
+          # runner) takes an in-place backup-suffix argument next and reads "$RUNNER_TEMP/msg"
+          # as the script instead — "extra characters at the end of s command". A rewrite
+          # through a temp file has no such divergence on either sed.
+          sed 's/^          //' "$RUNNER_TEMP/msg" > "$RUNNER_TEMP/msg.out"
+          mv "$RUNNER_TEMP/msg.out" "$RUNNER_TEMP/msg"
+          git commit -F "$RUNNER_TEMP/msg"
+          git push origin "$BRANCH"
+
+      # RE-ESTABLISH THE TOOLCHAIN AGAINST THE TREE THE GATE IS ABOUT TO JUDGE.
+      #
+      # WHY THIS STEP EXISTS, and it is not a tidy-up. The toolchain action above runs BEFORE
+      # the agent, so it resolves against the manifest that existed at checkout. A session may
+      # edit that manifest (adding a dependency once moved the language version as a side
+      # effect). The pre-agent resolution then judged the tree green while ci.yml, re-reading
+      # the edited file, resolved a different toolchain and failed the audit gate with 22
+      # standard-library advisories. The driver had written `status: passed` into
+      # the plan FOR A TREE CI REJECTS.
+      #
+      # When a person read every session PR that was survivable. It stops
+      # being survivable under the chain, because `preflight.sh` reads that `passed` and starts
+      # the next session on top of it — a false green becomes the foundation of everything
+      # after it, unattended.
+      #
+      # THE GENERAL RULE, because the toolchain is only the instance: any input this workflow
+      # resolves BEFORE the agent runs can be invalidated BY the agent, and nothing downstream
+      # notices. That is the shape of the revoked-credential defect (a precondition destroyed
+      # by the expensive step) and it takes the same remedy — re-establish it afterwards, and
+      # let the gate run against what will actually be pushed. It is the SAME action as before
+      # the agent, deliberately: the linter and scanner it installs are built by whichever
+      # toolchain is active, so a re-resolve that left them in place would be the same defect
+      # one layer down. One action, so neither half can be re-run without the other, and
+      # scripts/driver/step-order.sh refuses a driver where this step is missing or misplaced.
+      - name: Re-establish the toolchain and the gate's tooling under the session's own tree
+        uses: ./.github/actions/toolchain
+
+      # THE GATE. The session's own done-criterion, run by the workflow rather than by the
+      # agent, with CI=true so nothing is skippable. continue-on-error because a red gate
+      # must still be WRITTEN into the plan — a session that fails and records nothing is
+      # indistinguishable from a driver that never ran.
+      - name: Run the session's gate (scripts/check.sh)
+        id: gate
+        continue-on-error: true
+        run: ./scripts/check.sh && ./gates/check.test.sh
+
+      # THE PR IS OPENED WITH FACTORY_WRITE_TOKEN, NOT GITHUB_TOKEN, AND IT COSTS SOMETHING.
+      #
+      # `GITHUB_TOKEN` cannot do it: it fails with `GitHub Actions is not permitted to create
+      # or approve pull requests`. That is a repo setting, and the setting that lifts it ALSO
+      # grants Actions the ability to APPROVE pull requests: self-approval bypassing review,
+      # which must not exist when auto-merge is on. A token-opened pull request also DOES
+      # trigger `ci.yml` on `pull_request`, which a GITHUB_TOKEN-opened one never will.
+      #
+      # THE COST, RECORDED RATHER THAN ABSORBED: a personal token is broader than this use,
+      # and the pull request reads as opened by its owner rather than by a machine. The commits
+      # inside it are authored by `claude[bot]`, so provenance survives where it matters. A
+      # forge app of the adopter's own removes both costs at once.
+      - name: Open the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          title="$(grep -m1 "^## Session ${SESSION}:" "$PLAN" | sed "s/^## Session //")"
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          risk="$(./scripts/driver/plan-read.sh --plan "$PLAN" --session "$SESSION" --field risk_class)"
+          gate_cmd="$(./scripts/driver/plan-read.sh --plan "$PLAN" --session "$SESSION" --field gate.command)"
+
+          cat > "$RUNNER_TEMP/body.md" <<BODY
+          **Opened by the pipeline driver.** \`merge.yml\` lands it with no person present only if the
+          session passed, its risk class is within the plan's \`autonomy_level\`, CI is green, the
+          reader (\`factory/reader\`) found nothing, and the head is current with main. Otherwise it is
+          labelled \`$FACTORY_ESCALATION_LABEL\` and waits for a person (ADR-0008 in the factory).
+
+          | | |
+          |---|---|
+          | Session | \`$SESSION\` of plan \`$plan_id\` |
+          | Risk class | \`$risk\` |
+          | Gate | \`$gate_cmd\` |
+          | Gate result in the driver run | **$GATE_OUTCOME** |
+          | Driver run | $RUN_URL |
+
+          The commits here are authored by \`<SERVICE> driver <driver@factory.invalid>\`, which is
+          what makes "written by the machine" checkable rather than claimed. The second
+          commit writes this session's \`status\` and \`evidence\` into \`docs/plan/plan.md\`.
+
+          **Two independent gate runs.** The authoritative one is the driver run above,
+          which ran \`scripts/check.sh && gates/check.test.sh\` with \`CI=true\` and every
+          declared input supplied, on this branch's head. \`ci.yml\` runs again on this pull
+          request, because it was opened with a PAT rather than with \`GITHUB_TOKEN\` —
+          which would have triggered nothing.
+
+          The driver never merges its own work: building is this workflow's job, landing is
+          \`merge.yml\`'s, and continuing the plan is \`chain.yml\`'s.
+          BODY
+          # See the same fix in "Commit the session's work": `sed -i` is not portable
+          # between GNU sed (ubuntu-latest) and BSD sed (macOS, the self-hosted runner).
+          sed 's/^          //' "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/body.md.out"
+          mv "$RUNNER_TEMP/body.md.out" "$RUNNER_TEMP/body.md"
+
+          # A retry reuses the open PR an earlier attempt opened on this same branch:
+          # `gh pr create` refuses a second PR for one head, and that refusal failed a
+          # session whose gate had PASSED. The branch was reset and force-pushed, so the
+          # existing PR now shows this attempt, and the push re-runs the reader on it.
+          existing="$(gh pr list --head "$BRANCH" --base "$BASE" --state open \
+                        --json url --jq '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body-file "$RUNNER_TEMP/body.md" >/dev/null
+            url="$existing"
+            printf 'reused %s (opened by an earlier attempt; it now carries this one)\n' "$url"
+          else
+            url="$(gh pr create --base "$BASE" --head "$BRANCH" \
+                     --title "$title" --body-file "$RUNNER_TEMP/body.md")"
+            printf 'opened %s\n' "$url"
+          fi
+          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
+
+      # State lives in the plan file, on the SESSION BRANCH, never on main.
+      # Written by the machine, in its own commit, so the diff and the commit author are
+      # the proof rather than a line in a report.
+      # `if: always()` BECAUSE THE STATE MACHINE MUST NOT BE DOWNSTREAM OF THE PR STEP.
+      #
+      # docs/plan/plan.md is the pipeline's state file, and preflight.sh refuses any session
+      # whose depends_on are not
+      # `passed`. So a missing status line is not a gap in the record — it HALTS every
+      # later session behind it.
+      #
+      # That is not hypothetical: `gh pr create` once failed, and because this step ran
+      # after it, the state write never happened either. A cosmetic failure took the state
+      # machine down with it, and the line had to be written by hand so that the next
+      # session could ever start.
+      #
+      # The gate step is already continue-on-error, so the gate's own verdict always
+      # reaches here. If the PR step failed, ${{ steps.pr.outputs.url }} is empty and the
+      # evidence says so rather than pretending — a status line with an honest gap in it
+      # is worth incomparably more than no status line at all.
+      - name: Write status and evidence into the plan
+        if: always() && steps.gate.conclusion != ''
+        env:
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # THREE OUTCOMES, NOT TWO. `failure` is the gate having run and said no. `cancelled`
+          # and `skipped` mean no verdict was produced — a timeout mid-gate, or an upstream
+          # step that failed first — and recording those as `failed` tells the next reader
+          # that the work is bad when nobody has looked at it. A run once cancelled mid-gate
+          # was written `failed`, and was green when ci.yml judged the same commit.
+          case "$GATE_OUTCOME" in
+            success) status=passed  ;;
+            failure) status=failed  ;;
+            *)       status=ungated ;;
+          esac
+          ./scripts/driver/plan-write.sh --plan "$PLAN" --session "$SESSION" \
+            --status "$status" \
+            --evidence "PR: ${PR_URL:-NOT OPENED — see the driver run} · driver run (gate): ${run_url}"
+          git add "$PLAN"
+          git commit -m "chore(plan): ${SESSION} status=${status}, written by the driver
+
+          The gate ran in the driver workflow, not in the session, and this line records
+          its exit code. Self-report is not evidence; this commit is.
+
+          Driver run: ${run_url}"
+          git push origin "$BRANCH"
+
+      # THE LEDGER IS WRITTEN ON EVERY OUTCOME, AND `always()` IS THE LOAD-BEARING PART.
+      #
+      # A run that failed still spent the money. The alternative once cost two runs, $41.97,
+      # and not one line anywhere a ceiling could read. If this step were `success()` the ledger
+      # would record only the cheap, happy sessions and the ceiling would defend a number
+      # computed from the runs that least needed bounding.
+      #
+      # It is also why `attempt` is derived here rather than stored in the plan: the ledger
+      # already holds one record per run, so counting them IS the retry counter, and a second
+      # place to record attempts is a second place to disagree.
+      #
+      # WRITING INTO THE OPS REPO IS A CROSS-REPO WRITE (ADR-0007 decision 12), and it needs no
+      # new credential: FACTORY_WRITE_TOKEN is already in this workflow for the pull request,
+      # and the AGENT never sees it, because this step runs long after the agent step has
+      # ended. Telemetry appends to the ops repo's main without review; code never does.
+      #
+      # continue-on-error, deliberately: a session's work and its verdict must not be lost
+      # because a bookkeeping push raced another run. The retry logic reads the ledger, so a
+      # dropped line makes the next ceiling check UNDERCOUNT — which is why the failure is
+      # annotated loudly rather than swallowed.
+      - name: Record what this run spent
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          set -euo pipefail
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          case "$GATE_OUTCOME" in
+            (success) status=passed  ;;
+            (failure) status=failed  ;;
+            (*)       status=ungated ;;
+          esac
+
+          # A RUN WITH NO COST IS STILL AN ATTEMPT, AND THAT IS THE WHOLE POINT OF THIS BLOCK.
+          #
+          # The cost comes from the agent's execution file, which only carries a `result`
+          # record if the agent step ran to completion. A run CANCELLED mid-agent therefore
+          # reports nothing — and this step used to be conditioned on the cost being non-empty,
+          # so it recorded nothing at all.
+          #
+          # That is not an accounting gap, it is an UNBOUNDED RETRY LOOP. `attempts` is counted
+          # from this ledger, so a run that records nothing is a run that never happened: the
+          # chain would re-dispatch the same session forever, each attempt leaving no trace of
+          # itself, and `retry_cap` could never be reached. The bound exists in the plan, is
+          # read by the chain, and would never fire.
+          #
+          # So the attempt is recorded either way. When the cost is unknown it is recorded as 0
+          # and said so LOUDLY: the ledger then undercounts spend, which is a visible,
+          # bounded wrong answer, where the alternative is an invisible unbounded one.
+          cost="${{ steps.usage.outputs.cost }}"
+          turns="${{ steps.usage.outputs.turns }}"
+          if [ -z "$cost" ]; then
+            cost=0; turns=0
+            printf '::warning title=Driver::this run produced no execution file — recording the attempt with cost 0, so the ledger UNDERCOUNTS spend for %s. The attempt itself must be counted or retry_cap can never be reached.\n' "$SESSION"
+          fi
+
+          work="$RUNNER_TEMP/ledger-repo"
+          rm -rf "$work"
+          git clone --depth 1 --no-tags \
+            "https://x-access-token:${GH_TOKEN}@github.com/${FACTORY_OPS_REPO}.git" "$work" >/dev/null 2>&1
+
+          target="$work/$FACTORY_OPS_LEDGER_PATH"
+          mkdir -p "$(dirname "$target")"
+          # The attempt number is one more than however many records this session already has.
+          attempt=$(( $(./scripts/driver/spend.sh --file "$target" --attempts \
+                          --plan-id "$plan_id" --session "$SESSION") + 1 ))
+
+          ./scripts/driver/spend.sh --file "$target" --append \
+            --plan-id "$plan_id" --session "$SESSION" --attempt "$attempt" \
+            --status "$status" --cost "$cost" \
+            --turns "$turns" --run-url "$run_url"
+
+          cd "$work"
+          git config user.name  "claude[bot]"
+          git config user.email "41898282+claude[bot]@users.noreply.github.com"
+          git add "$FACTORY_OPS_LEDGER_PATH"
+          git commit -q -m "chore(costs): ${plan_id} ${SESSION} attempt ${attempt} — \$${cost} (${status})
+
+          Written by the driver from run ${run_url}. One record per RUN, not per session:
+          a failed attempt spent money and the ceiling has to see it."
+          # One retry on a race: another driver run may have pushed between the clone and here.
+          if ! git push -q origin HEAD 2>/dev/null; then
+            git pull -q --rebase origin HEAD && git push -q origin HEAD \
+              || printf '::warning title=Driver::the spend ledger could not be pushed; the next ceiling check will UNDERCOUNT by $%s AND the attempt will not be counted\n' "$cost"
+          fi
+
+      # Last, so the plan is written and the PR exists whatever the gate said. A red gate
+      # is a red workflow: a driver that swallows a failure is the silent-failure mode.
+      - name: Fail the run if the gate was red
+        if: steps.gate.outcome != 'success'
+        run: |
+          printf '::error title=Driver::the session gate FAILED; plan.md records status=failed and the PR is open for a person\n'
+          exit 1
+
+      # NEVER LOSE A SESSION'S WORK TO A FAILED PUSH AGAIN. One run produced 86 turns of
+      # committed work that existed only on the runner when the push failed, and the runner
+      # was destroyed with it. A bundle costs nothing and is a
+      # complete, clonable copy of everything the session did.
+      - name: Bundle the session's work if the run failed
+        if: failure() || cancelled()
+        continue-on-error: true
+        run: git bundle create "$RUNNER_TEMP/session.bundle" --all
+
+      - name: Upload the bundle so a failed push does not destroy the session
+        if: failure() || cancelled()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-${{ inputs.session }}-work-${{ github.run_id }}
+          path: ${{ runner.temp }}/session.bundle
+          if-no-files-found: warn
+          retention-days: 14

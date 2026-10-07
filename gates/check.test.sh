@@ -108,6 +108,8 @@ run gate-2-dangling-link      1 'CHECK FAILED at: links resolve' \
     'a relative link to a file that does not exist'
 run gate-3-never-vendored     1 'CHECK FAILED at: scaffold self-consistency' \
     'the scaffold links a docs/process/ file that sync/manifest never vendors'
+run gate-9-no-evaluator      1 'CHECK FAILED at: reader evaluator' \
+    'the reader evaluator is gone, so its fixtures cannot prove it can fail'
 run gate-4-broken-sync        1 'CHECK FAILED at: sync round-trip' \
     'process-sync.sh copies nothing — --check would pass vacuously'
 

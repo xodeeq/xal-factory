@@ -1,0 +1,6 @@
+name: Driver
+jobs:
+  run:
+    steps:
+      - run: ./scripts/driver/preflight.sh
+      - run: ./scripts/check.sh

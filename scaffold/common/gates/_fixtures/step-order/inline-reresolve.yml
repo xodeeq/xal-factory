@@ -1,0 +1,18 @@
+# Re-resolved after the agent, but by steps written inline rather than by the overlay's
+# toolchain action. The rule cannot vouch for what an inline step re-established — here the
+# toolchain is re-resolved and the gate's tools are NOT reinstalled, which is a linter and a
+# scanner built by the previous compiler judging this tree — so it is refused: the action is
+# the one unit that re-resolves and reinstalls together.
+jobs:
+  run:
+    steps:
+      - name: Resolve the toolchain and install the gate's tooling
+        uses: ./.github/actions/toolchain
+      - name: Run the session headless
+        uses: anthropics/claude-code-action@v1
+      - name: Re-resolve Go against the session's own go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run the session's gate (scripts/check.sh)
+        run: ./scripts/check.sh

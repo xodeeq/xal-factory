@@ -1,0 +1,267 @@
+# merge.yml: whether a finished session's pull request lands with no person present.
+# ADR-0008 in the factory (adr/0008-auto-merge-and-the-reader.md).
+#
+# THREE FILES, THREE QUESTIONS. driver.yml builds one session and stops. chain.yml decides
+# whether the plan continues. This file decides whether a finished session LANDS. Keeping
+# them apart is the argument chain.yml's header makes, one step further: a driver that merged
+# its own work would be both builder and judge, and the verdict it believed would have no
+# second opinion.
+#
+# THE RULING: automated runs' PRs merge with no human push, PROVIDED THE GATES THAT APPLY TO A
+# PR ARE OBEYED. Branch protection may not be available (a private repo on a free plan has
+# none), so this workflow assumes no required check, no merge queue and no native auto-merge. Every guarantee GitHub would normally give is given HERE, by
+# `scripts/driver/merge-decision.sh`, which is the only thing that says yes:
+#
+#   the head's plan changed only this session's status and evidence
+#   no gate or pipeline path changed that the plan did not declare   (CI runs the head's gate)
+#   the driver's gate passed the session                    (status: passed on the head)
+#   autonomy_level, read from MAIN, admits its risk_class   (read from MAIN)
+#   CI's gate check on the head is green                    (unjudged is not green)
+#   the reader's verdict on the head is clean               (ADR-0009 decision 10)
+#   the head is current with main, or it is re-gated first  (no merge queue exists)
+#
+# WHAT HAPPENS WHEN IT SAYS NO. The pull request stays open, labelled `"$FACTORY_ESCALATION_LABEL"`, with the
+# reason as a comment, and a board issue carries the roadmap §7.3 body. The job ends GREEN,
+# because a designed stop is the system working, not failing. The plan halts by itself —
+# nothing merged, so chain.yml's `advance` never fires — and resumes the moment a person
+# merges, through the same trigger, unchanged.
+#
+# WHAT HAPPENS WHEN IT SAYS YES. `gh pr merge --merge --match-head-commit <sha>` with the PAT:
+#   --merge                 a merge commit, so the claude[bot] RED→GREEN commits stay on main
+#                           as the evidence that TDD was performed (practice since plan S1)
+#   --match-head-commit     GitHub refuses the merge if the head moved after it was judged —
+#                           the window between the verdict and the button, closed
+#   FACTORY_WRITE_TOKEN       a PAT-authored merge fires `pull_request: closed` exactly as a
+#                           person's does, so chain.yml's `advance` job — including its
+#                           main-is-green halt — runs unchanged. A GITHUB_TOKEN merge would
+#                           trigger nothing and the plan would stop in silence.
+#
+# WHAT THIS WORKFLOW MAY NOT DO. Approve a pull request (nothing here has, or needs, that
+# right — with no branch protection there is no review requirement to satisfy). Use `--admin`
+# or `--auto`. Push to any branch. Write the plan. Deploy. Merge anything that is not a
+# session branch of the plan on main.
+name: Merge
+
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('Merge — {0}', inputs.session)
+      || format('Merge — after {0}', github.event.workflow_run.display_title) }}
+
+on:
+  workflow_run:
+    workflows: ["Driver"]
+    types: [completed]
+  # THE RE-ENTRY PATH, present from the first commit rather than discovered missing on the first
+  # live run as chain.yml's was. After a person clears a stop — the reader's finding answered,
+  # CI re-run green — this asks the same questions again. It cannot skip any of them.
+  workflow_dispatch:
+    inputs:
+      session:
+        description: 'Session id whose open PR should be judged, e.g. S3'
+        required: true
+        type: string
+
+# One merge decision at a time per repository, in its OWN group rather than chain.yml's. A
+# merge waits up to ~40 minutes on CI and the reader, and GitHub keeps only one PENDING run per
+# concurrency group — so sharing the chain's group would let a waiting merge displace a queued
+# chain decision, silently.
+concurrency:
+  group: merge-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  land:
+    name: Land the session, or stop for the owner
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    env:
+      PLAN: docs/plan/plan.md
+      GATE_CHECK: "Gates (scripts/check.sh)"
+      READER_CONTEXT: factory/reader
+    steps:
+      # MAIN, because autonomy_level and risk_class are read from the approved plan and never
+      # from the branch whose merge is being decided.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # The factory configuration (ops repo, ledger path, escalation label) as FACTORY_* for
+      # every later step. See scripts/driver/config.sh.
+      - name: Read the factory configuration
+        run: ./scripts/driver/config.sh --emit | tee -a "$GITHUB_ENV"
+
+      - name: Recover which session this is, and its pull request
+        id: which
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          RUN_TITLE: ${{ github.event_name == 'workflow_dispatch' && format('dispatch — {0}', inputs.session) || github.event.workflow_run.display_title }}
+        run: |
+          set -euo pipefail
+          session="$(./scripts/driver/run-session-id.sh --plan "$PLAN" --title "$RUN_TITLE")"
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          branch="plan/${plan_id}/$(printf '%s' "$session" | tr 'A-Z' 'a-z')"
+          pr="$(gh pr list --repo "${{ github.repository }}" --head "$branch" --state open \
+                  --json number --jq '.[0].number // empty')"
+          if [ -z "$pr" ]; then
+            printf 'REFUSED: %s has no OPEN pull request on %s — nothing to land.\n' "$session" "$branch"
+            printf '::error title=Merge refused::no open pull request for %s\n' "$session"
+            exit 3
+          fi
+          {
+            printf 'session=%s\n' "$session"
+            printf 'plan_id=%s\n' "$plan_id"
+            printf 'branch=%s\n' "$branch"
+            printf 'pr=%s\n' "$pr"
+          } >> "$GITHUB_OUTPUT"
+          printf '  %s → #%s on %s\n' "$session" "$pr" "$branch"
+
+      # THE FACTS, THEN THE DECISION, THEN THE ACT — in a loop, because `update` is a decision
+      # that changes the facts. Each round re-reads everything against the CURRENT head: a
+      # verdict for a sha that is no longer the head is a verdict about something else.
+      #
+      # Both verdicts are POLLED, bounded. The driver run that triggered this ends seconds after
+      # its last push, and CI and the reader start on that push at the same instant — so a
+      # single read here finds no verdict, and "unjudged is not green" would then stop EVERY
+      # session. That is chain.yml's first-live-run defect (run 35774727222), and merge-check
+      # rule 3 refuses its shape here.
+      - name: Judge the head, then merge, re-gate, or stop
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          SESSION: ${{ steps.which.outputs.session }}
+          BRANCH: ${{ steps.which.outputs.branch }}
+          PR: ${{ steps.which.outputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+
+          # ci_verdict <sha> — the gate check's conclusion, or empty if it never completed.
+          ci_verdict() {
+            local sha="$1" c=""
+            for _ in $(seq 1 30); do
+              c="$(gh api "repos/$REPO/commits/$sha/check-runs" \
+                     --jq "[.check_runs[] | select(.name == \"$GATE_CHECK\")] | sort_by(.started_at) | last | select(.status == \"completed\") | .conclusion // empty" \
+                     2>/dev/null || true)"
+              [ -n "$c" ] && break
+              printf '  waiting for CI on %s…\n' "${sha:0:7}" >&2
+              sleep 30
+            done
+            printf '%s' "$c"
+          }
+
+          # reader_verdict <sha> — the reader's commit status, or empty if it never posted one.
+          # `pending` is waited through; it is only ever reported if the bound runs out.
+          reader_verdict() {
+            local sha="$1" s=""
+            for _ in $(seq 1 40); do
+              s="$(gh api "repos/$REPO/commits/$sha/statuses" \
+                     --jq "[.[] | select(.context == \"$READER_CONTEXT\")] | first | .state // empty" \
+                     2>/dev/null || true)"
+              case "$s" in (success|failure|error) break ;; esac
+              printf '  waiting for the reader on %s… (%s)\n' "${sha:0:7}" "${s:-no status yet}" >&2
+              sleep 30
+            done
+            printf '%s' "$s"
+          }
+
+          stop() {
+            printf 'reason=%s\n' "$1" >> "$GITHUB_OUTPUT"
+            printf 'outcome=stop\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # At most two re-gates. If main moves under the same PR three times while this job
+          # waits, something else is landing on main and a person should see why.
+          for round in 1 2 3; do
+            sha="$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)"
+            printf '━━ round %s: #%s at %s\n' "$round" "$PR" "${sha:0:7}"
+
+            # No `set -e` in this step (a refusal's exit 3 must be caught, not fatal), so every
+            # command whose failure would leave a stale fact behind is checked by hand.
+            git fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" \
+              || { printf '::error title=Merge::could not fetch %s\n' "$BRANCH"; exit 2; }
+            git show "$sha:$PLAN" > "$RUNNER_TEMP/head-plan.md" \
+              || { printf '::error title=Merge::the head %s carries no %s\n' "${sha:0:7}" "$PLAN"; exit 2; }
+
+            # What the PR changes, against its merge base with main — the list merge-decision
+            # checks for gate and pipeline paths the session never declared.
+            git diff --name-only "$(git merge-base origin/main "$sha")" "$sha" > "$RUNNER_TEMP/changed.txt" \
+              || { printf '::error title=Merge::could not list what %s changes\n' "${sha:0:7}"; exit 2; }
+
+            ci="$(ci_verdict "$sha")"
+            reader="$(reader_verdict "$sha")"
+            behind="$(gh api "repos/$REPO/compare/main...$sha" --jq .behind_by)" \
+              || { printf '::error title=Merge::could not compare %s with main\n' "${sha:0:7}"; exit 2; }
+            printf '  CI %s · reader %s · behind main by %s\n' "${ci:-none}" "${reader:-none}" "$behind"
+
+            decision="$(./scripts/driver/merge-decision.sh \
+                          --main-plan "$PLAN" --head-plan "$RUNNER_TEMP/head-plan.md" \
+                          --session "$SESSION" --changed-files "$RUNNER_TEMP/changed.txt" \
+                          --ci "$ci" --reader "$reader" --behind "$behind" \
+                          2> "$RUNNER_TEMP/why.txt")"; rc=$?
+            cat "$RUNNER_TEMP/why.txt"
+            case "$rc" in
+              (0) ;;
+              (3) stop "$(grep -m1 '^REFUSED:' "$RUNNER_TEMP/why.txt" | sed 's/^REFUSED: //')" ;;
+              (*) printf '::error title=Merge::merge-decision could not run (exit %s)\n' "$rc"; exit "$rc" ;;
+            esac
+
+            case "$decision" in
+              (merge)
+                gh pr merge "$PR" --repo "$REPO" --merge --match-head-commit "$sha" \
+                  || { printf '::error title=Merge::GitHub refused the merge of #%s at %s\n' "$PR" "${sha:0:7}"; exit 1; }
+                printf 'outcome=merged\n' >> "$GITHUB_OUTPUT"
+                printf '::notice title=Merged::%s (#%s) landed at %s with no person present\n' "$SESSION" "$PR" "${sha:0:7}"
+                exit 0 ;;
+              (update)
+                # RE-BASE AND RE-GATE. GitHub merges main into the head (a PAT-authored push, so
+                # CI and the reader both run again on the new head), and the next round judges
+                # THAT. `expected_head_sha` refuses if the head moved since it was read.
+                gh api -X PUT "repos/$REPO/pulls/$PR/update-branch" -f expected_head_sha="$sha" >/dev/null \
+                  || stop "GitHub could not bring #$PR up to date with main (a conflict?) — a person resolves it"
+                for _ in $(seq 1 20); do
+                  new="$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)"
+                  [ "$new" != "$sha" ] && break
+                  sleep 6
+                done
+                printf '  re-based onto main; re-gating the new head\n' ;;
+              (*)
+                printf '::error title=Merge::merge-decision answered "%s", which is not a decision\n' "$decision"
+                exit 2 ;;
+            esac
+          done
+          stop "main moved under #$PR on three consecutive rounds — a person should see what is landing"
+
+      # A DESIGNED STOP. Labelled, explained on the PR, and put on the board — the three places a
+      # person looks — and the job is GREEN. The plan halts because nothing merged, which is the
+      # only halt it needs.
+      - name: Hand the pull request to the owner
+        if: steps.decide.outputs.outcome == 'stop'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          SESSION: ${{ steps.which.outputs.session }}
+          PLAN_ID: ${{ steps.which.outputs.plan_id }}
+          PR: ${{ steps.which.outputs.pr }}
+          REASON: ${{ steps.decide.outputs.reason }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create "$FACTORY_ESCALATION_LABEL" --repo "$REPO" --color B60205 \
+            --description "The pipeline stopped here; a person decides" --force >/dev/null
+          gh pr edit "$PR" --repo "$REPO" --add-label "$FACTORY_ESCALATION_LABEL" >/dev/null
+          gh pr comment "$PR" --repo "$REPO" --body "$(printf '**The pipeline did not merge this, and a person must.**\n\n%s\n\nMerging it by hand resumes the plan: `chain.yml` fires on the merge exactly as it does for an automatic one. If the cause is fixed instead, re-enter with a manual `Merge` dispatch for `%s`.\n\nDecision run: %s\n' "$REASON" "$SESSION" "$RUN_URL")" >/dev/null
+          if ! gh issue create --repo "$FACTORY_OPS_REPO" \
+                --title "NEEDS THE OWNER: ${PLAN_ID} ${SESSION} did not auto-merge" \
+                --body "$(printf 'Blocked session: %s %s\nAction needed from the owner: read #%s in %s and merge it, or answer what stopped it\nWhy the machine could not do it: approval — %s\nWhat resumes when done: the chain, on the merge\nDeadline effect: the plan is halted until this lands\n\nDecision run: %s\n' \
+                  "$PLAN_ID" "$SESSION" "$PR" "$REPO" "$REASON" "$RUN_URL")" >/dev/null 2>&1; then
+            printf '::warning title=Merge::BOARD NOT SYNCED — the issue could not be created; the PR label and comment are the record\n'
+          fi
+          printf '::notice title=Stopped for the owner::%s (#%s): %s\n' "$SESSION" "$PR" "$REASON"

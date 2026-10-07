@@ -1,0 +1,5 @@
+name: Chain
+jobs:
+  advance:
+    steps:
+      - run: ./scripts/driver/select-next.sh

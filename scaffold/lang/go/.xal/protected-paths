@@ -1,0 +1,14 @@
+# .xal/protected-paths — paths merge-decision.sh treats as GATE or PIPELINE paths, beyond the
+# built-in five (scripts/ gates/ .github/ .xal/ docs/process/) that are the same in every
+# service. A driven session's pull request may change one of these only if the approved plan
+# lists it among that session's `artifacts`; otherwise the merge stops for a person, because
+# CI judged the head with the head's own gate (ADR-0008 in the factory, decision 2, condition 2).
+#
+# One shell pattern per line, matched like a `case` pattern against the changed path.
+# `#` comments and blank lines are ignored. This file sits under .xal/, so it is protected
+# by the built-in set and cannot be widened or shrunk by the branch being judged — merge.yml
+# runs the decision from a checkout of main.
+#
+# THE GO OVERLAY'S ENTRIES. The linter's configuration is gate configuration: a session that
+# relaxed a depguard rule would be judged green by the gate it relaxed.
+.golangci.yml

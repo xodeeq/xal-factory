@@ -1,0 +1,404 @@
+# chain.yml — pipeline S6, driver v1. The thing that decides whether ANOTHER session runs.
+#
+# driver.yml runs exactly one session and stops; that is deliberate and unchanged. This file
+# is the only thing that may start a second one, and keeping the two separate is the point:
+# the driver's job is to build a session honestly, and this file's job is to decide whether
+# the pipeline should continue. A driver that chained itself would be both, and the failure
+# where it keeps dispatching because it believes its own verdict would have no second opinion.
+#
+# TWO TRIGGERS, TWO QUESTIONS ------------------------------------------------------------
+#
+#   pull_request: closed   A session PR merged. Question: what runs next?
+#   workflow_run: Driver   A driver run ended. Question: does THIS session run again?
+#
+# The second is where retry and escalation live. A failed session leaves an open PR that
+# nobody merges, so the merge trigger would never fire for it — retry has to hang off the run
+# itself or a failing session would silently stall the plan forever.
+#
+# WHAT STILL REQUIRES A PERSON, AND THIS IS SCOPE, NOT AN OVERSIGHT ------------------------
+#
+# NOTHING HERE MERGES ANYTHING, AND THAT STAYS TRUE AT PIPELINE S7. the owner ruled on 2026-09-19
+# that automated runs' PRs may auto-merge; S7 built that in `merge.yml`, a workflow of its own
+# (ADR-0008 in the factory). The driver builds, this file decides whether the plan continues, and
+# merge.yml decides whether a finished session lands — three questions, three files, so none
+# of them believes its own verdict unchecked. A merge merges with FACTORY_WRITE_TOKEN, and a
+# PAT-authored merge fires `pull_request: closed` exactly as a person's does, so the `advance`
+# job below is unchanged whichever of them pressed the button.
+#
+# `autonomy_level` IS NOT READ HERE. merge-decision.sh is the only reader, because deciding
+# what may land without a person is merge.yml's question and not this file's.
+#
+# THE THREE THINGS THAT STOP THIS CHAIN ----------------------------------------------------
+#
+#   1. An escalated session anywhere in the plan (select-next.sh refuses).
+#   2. Either spend ceiling (driver.yml checks before its agent step; this file checks too,
+#      so a chain does not dispatch a run that is going to refuse itself).
+#   3. A red `main`. Verified below rather than assumed: `preflight` reads `passed` out of the
+#      plan and has never asked whether the base it would build on is green. With no branch
+#      protection available on these private repos, nothing else asks either.
+#
+# WHAT THIS WORKFLOW MAY NOT DO. Merge (that is merge.yml's, pipeline S7). Deploy or touch deploy.yml (spec H-13
+# and H-5, human-only). Write to main. Edit any session's scope, artifacts, gate or prompt.
+name: Chain
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_run:
+    workflows: ["Driver"]
+    types: [completed]
+  # THE RE-ENTRY POINT, and it was missing on the first live run. ADR-0009 decision 14 says a
+  # person re-dispatches once `main` is settled — but there was nothing to re-dispatch: the
+  # chain had no manual trigger, so the only way back in was `driver.yml` directly, which
+  # bypasses BOTH the selection rule and both ceilings. A documented recovery path that does
+  # not exist is worse than none, because it reads as covered.
+  workflow_dispatch:
+
+# One chain decision at a time per repository. Two of these racing would each select a next
+# session against the same plan and dispatch twice — the concurrency hazard the 2026-09-19
+# ruling names, arriving through the chain rather than through two open PRs.
+concurrency:
+  group: chain-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # ---------------------------------------------------------------------------------------
+  # A SESSION PR MERGED. What runs next?
+  # ---------------------------------------------------------------------------------------
+  advance:
+    name: A session merged — select and dispatch the next
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'plan/'))
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      PLAN: docs/plan/plan.md
+    steps:
+      # The MERGED result, not the branch. The 2026-09-19 concurrency finding is the reason:
+      # two individually-green PRs can be red combined, and every session in a plan writes
+      # docs/plan/plan.md (and, in a repo with a coverage ratchet, its floors). What the next
+      # session builds on is main.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # The factory configuration (ops repo, ledger path, escalation label) as FACTORY_* for
+      # every later step. See scripts/driver/config.sh.
+      - name: Read the factory configuration
+        run: ./scripts/driver/config.sh --emit | tee -a "$GITHUB_ENV"
+
+      # A PLAN AMENDMENT IS NOT A SESSION MERGE, AND `plan/` MATCHES BOTH.
+      #
+      # The job-level `if` filters on `startsWith(head.ref, 'plan/')`, which is as precise as a
+      # GitHub expression can be without regex or the plan id. It is not precise enough:
+      # session branches are `plan/<plan-id>/s<N>`, and plan AMENDMENTS are branches like
+      # `plan/session-ceiling-70`. Merging a plan-amendment PR — the ceiling change — therefore looked
+      # like a finished session, and the chain selected S9 and dispatched a real one. Nobody
+      # asked for it and every future amendment would have done the same.
+      #
+      # So the precise test lives here, where the plan id is readable, and it SKIPS rather than
+      # fails: an amendment merge is a perfectly normal thing to do, and a red chain run on
+      # every one would train everybody to ignore the chain going red.
+      - name: Is this actually a session of this plan?
+        id: scope
+        # The branch name reaches the shell through the environment, never by interpolation into
+        # the script: a ref is text a pusher chooses, and `${{ }}` inside `run:` splices it into
+        # the program before bash parses it. Flagged by actionlint during pipeline S7.
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            printf 'proceed=true\n' >> "$GITHUB_OUTPUT"
+            printf '  manual re-entry — proceeding\n'
+            exit 0
+          fi
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          ref="$HEAD_REF"
+          case "$ref" in
+            ("plan/$plan_id/s"[0-9]*)
+              printf 'proceed=true\n' >> "$GITHUB_OUTPUT"
+              printf '  %s is a session branch of %s — proceeding\n' "$ref" "$plan_id" ;;
+            (*)
+              printf 'proceed=false\n' >> "$GITHUB_OUTPUT"
+              printf '  %s is not a session branch of %s — nothing to chain.\n' "$ref" "$plan_id"
+              printf '  (A plan amendment merges on a `plan/…` branch too; it is not a finished session.)\n' ;;
+          esac
+
+      # `main` CAN NOW GO RED WITH NOBODY PRESENT, so the chain asks before building on it.
+      #
+      # This is consequence 3 of the 2026-09-19 ruling, and it is the halt condition preflight
+      # structurally cannot provide: preflight reads `passed` out of the plan file, which is a
+      # statement about a SESSION, not about the base that session would be built on. With no
+      # branch protection and no required checks available here, nothing else asks either.
+      #
+      # IT WAITS, AND THE FIRST LIVE RUN IS WHY. The version that shipped refused outright when
+      # no verdict existed yet, on the argument that holding a job open for a whole CI run is
+      # worse than asking a person to re-dispatch. That argument is wrong, and run 35774727222
+      # showed it in one merge: the chain fires on `pull_request: closed`, and CI on the merge
+      # commit starts at the SAME INSTANT — so the verdict is never ready when the chain looks,
+      # and "refuse when unjudged" means refuse EVERY TIME. The rule was right and the response
+      # made the chain a permanent no-op. Nothing in the fixtures could have caught it: they
+      # assert the check exists and precedes the dispatch, and it did both.
+      #
+      # So: poll until the verdict exists, then judge it. An unjudged base is still not a green
+      # one — waiting is not the same as assuming — and the bound below means a CI run that
+      # never finishes stops the chain rather than holding a runner forever.
+      - name: Wait for main's gate verdict, then refuse if it is not green
+        if: steps.scope.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          concl=""
+          # ~12 minutes at 30s. CI on this repo takes ~6; the job timeout is 15, so this bound
+          # is what stops a hung CI run from holding the runner to the job's own limit.
+          for _ in $(seq 1 24); do
+            concl="$(gh api "repos/${{ github.repository }}/commits/$sha/check-runs" \
+                       --jq '[.check_runs[] | select(.name == "Gates (scripts/check.sh)")] | .[0] | select(.status == "completed") | .conclusion // empty' 2>/dev/null || true)"
+            [ -n "$concl" ] && break
+            printf '  waiting for the gate verdict on %s…\n' "${sha:0:7}"
+            sleep 30
+          done
+
+          printf '  main at %s — gate check: %s\n' "${sha:0:7}" "${concl:-still running}"
+          case "$concl" in
+            (success) ;;
+            ("")
+              printf 'REFUSED: no gate verdict on main at %s after ~12 minutes.\n' "${sha:0:7}"
+              printf '         An unjudged base is not a green one. Re-enter with a manual\n'
+              printf '         `Chain` dispatch once CI has settled.\n'
+              printf '::error title=Chain refused::main has no gate verdict yet\n'
+              exit 3 ;;
+            (*)
+              printf 'REFUSED: main is %s at %s — the chain will not build on it.\n' "$concl" "${sha:0:7}"
+              printf '::error title=Chain refused::main is %s\n' "$concl"
+              exit 3 ;;
+          esac
+
+      # A FINISHED PLAN IS GREEN. select-next exits 4 when every session has passed, and this is
+      # the one outcome here that is neither a selection nor a refusal. It used to be exit 3,
+      # which made the chain run that followed the LAST session's merge read as red — run
+      # 36079123762, on the merge that completed the first plan. A red run for a finished plan
+      # teaches everybody to ignore the chain going red, which is the signal that matters most.
+      - name: Select the next session
+        id: select
+        if: steps.scope.outputs.proceed == 'true'
+        run: |
+          set -uo pipefail
+          next="$(./scripts/driver/select-next.sh --plan "$PLAN")"; rc=$?
+          case "$rc" in
+            (0) printf 'session=%s\n' "$next" >> "$GITHUB_OUTPUT"
+                printf '  next session: %s\n' "$next" ;;
+            (4) printf '  the plan is complete — nothing to chain to, and nothing is wrong\n' ;;
+            (*) exit "$rc" ;;
+          esac
+
+      # Checked HERE as well as in driver.yml, and the duplication is deliberate. The driver
+      # checks so that every path to an agent is bounded, including a hand dispatch. The chain
+      # checks so it does not dispatch a run whose only act would be to refuse itself — an
+      # unattended loop that burns a runner per session to discover it has no budget is a loop
+      # that looks like it is working.
+      - name: Check both ceilings before dispatching
+        if: steps.scope.outputs.proceed == 'true' && steps.select.outputs.session != ''
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          plan_ceiling="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm spend_ceiling_usd || true)"
+          session_ceiling="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm session_ceiling_usd || true)"
+          LEDGER="$RUNNER_TEMP/spend/costs.jsonl"
+          mkdir -p "$RUNNER_TEMP/spend"
+          if gh api "repos/$FACTORY_OPS_REPO/contents/$FACTORY_OPS_LEDGER_PATH" --jq '.content' 2>/dev/null \
+               | base64 -d > "$LEDGER" 2>/dev/null; then :; else rm -f "$LEDGER"; fi
+          ./scripts/driver/spend.sh --file "$LEDGER" --check \
+            --plan-id "$plan_id" --session "${{ steps.select.outputs.session }}" \
+            --plan-ceiling "${plan_ceiling:-unset}" --session-ceiling "${session_ceiling:-unset}"
+
+      # FACTORY_WRITE_TOKEN and not GITHUB_TOKEN: a workflow dispatched with GITHUB_TOKEN does
+      # not run, by GitHub's recursion guard. That guard exists for exactly the shape being
+      # built here, so this is the one place the chain has to step around it deliberately
+      # rather than by accident — and the bounds that replace it are the two ceilings above,
+      # the escalation halt, and `workflow_dispatch` still being the driver's only entry point.
+      - name: Dispatch the driver for the selected session
+        if: steps.scope.outputs.proceed == 'true' && steps.select.outputs.session != ''
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run driver.yml --ref main -f session="${{ steps.select.outputs.session }}"
+          printf '  dispatched driver.yml for %s\n' "${{ steps.select.outputs.session }}"
+
+  # ---------------------------------------------------------------------------------------
+  # A DRIVER RUN ENDED. Does this session run again, or does a person own it now?
+  # ---------------------------------------------------------------------------------------
+  retry-or-escalate:
+    name: A driver run ended — retry within cap, or escalate
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion != 'success'
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      PLAN: docs/plan/plan.md
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # The factory configuration (ops repo, ledger path, escalation label) as FACTORY_* for
+      # every later step. See scripts/driver/config.sh.
+      - name: Read the factory configuration
+        run: ./scripts/driver/config.sh --emit | tee -a "$GITHUB_ENV"
+
+      # WHICH SESSION WAS THAT? The driver is dispatched with an input, and a workflow_run
+      # event does not carry the triggering inputs — so the session is recovered from the
+      # branch the run left behind. `plan/<plan-id>/s<n>` is the driver's own naming and
+      # branch-check.sh is what guarantees the shape, so this reads a fact rather than a guess.
+      #
+      # If it cannot be recovered the job STOPS rather than guessing: retrying the wrong
+      # session would spend money on work nobody asked for.
+      # WHICH SESSION WAS THAT? Not `head_branch` — that was the first version and it could
+      # never work. A `workflow_run` event does not carry the inputs that started the run, and
+      # for a dispatched run `head_branch` is the ref it was dispatched ON: `main`, every time.
+      # So the retry path refused every run it was handed, and retry and escalation were
+      # unreachable rather than merely untested. Measured on run 35777940382:
+      #
+      #   REFUSED: run 35777754456 was on branch main, which is not a session branch
+      #
+      # The comment there claimed this "reads a fact rather than a guess". It read the wrong
+      # fact, which is worse than a guess, because it was confidently wrong and self-consistent.
+      #
+      # `display_title` comes from driver.yml's `run-name`, which IS evaluated with the inputs
+      # context — so the session id survives the dispatch. If it cannot be parsed the job STOPS
+      # rather than guessing: retrying the wrong session spends money on work nobody asked for.
+      # The parse lives in run-session-id.sh since pipeline S7, because merge.yml needs the
+      # same answer and a second copy of a lesson is a second place to un-learn it.
+      - name: Recover which session that run was
+        id: which
+        env:
+          RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+        run: |
+          set -euo pipefail
+          plan_id="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm plan_id)"
+          session="$(./scripts/driver/run-session-id.sh --plan "$PLAN" --title "$RUN_TITLE")"
+          printf 'session=%s\n' "$session" >> "$GITHUB_OUTPUT"
+          printf 'plan_id=%s\n' "$plan_id" >> "$GITHUB_OUTPUT"
+          printf '  that run was %s\n' "$session"
+
+      - name: Retry within the cap, or escalate and stop
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
+          SESSION: ${{ steps.which.outputs.session }}
+          PLAN_ID: ${{ steps.which.outputs.plan_id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          cap="$(./scripts/driver/plan-read.sh --plan "$PLAN" --session "$SESSION" --field retry_cap)"
+          cap="${cap:-0}"
+
+          LEDGER="$RUNNER_TEMP/spend/costs.jsonl"
+          mkdir -p "$RUNNER_TEMP/spend"
+          if gh api "repos/$FACTORY_OPS_REPO/contents/$FACTORY_OPS_LEDGER_PATH" --jq '.content' 2>/dev/null \
+               | base64 -d > "$LEDGER" 2>/dev/null; then :; else rm -f "$LEDGER"; fi
+
+          # ATTEMPTS COME FROM THE LEDGER, which holds one record per RUN because the driver
+          # writes it on every outcome. There is no attempts field in the plan, deliberately:
+          # a second place to record this is a second place for it to disagree, and the count
+          # that matters is the one the money was spent under.
+          attempts="$(./scripts/driver/spend.sh --file "$LEDGER" --attempts \
+                        --plan-id "$PLAN_ID" --session "$SESSION")"
+          printf '  %s: %s attempt(s) recorded, retry_cap %s\n' "$SESSION" "$attempts" "$cap"
+
+          if [ "$attempts" -le "$cap" ]; then
+            # The ceiling still applies to a retry — it is the bound that exists precisely for
+            # a session that keeps failing expensively.
+            plan_ceiling="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm spend_ceiling_usd || true)"
+            session_ceiling="$(./scripts/driver/plan-read.sh --plan "$PLAN" --fm session_ceiling_usd || true)"
+            if ./scripts/driver/spend.sh --file "$LEDGER" --check \
+                 --plan-id "$PLAN_ID" --session "$SESSION" \
+                 --plan-ceiling "${plan_ceiling:-unset}" --session-ceiling "${session_ceiling:-unset}"; then
+              gh workflow run driver.yml --ref main -f session="$SESSION"
+              printf '  retrying %s (attempt %s of %s permitted)\n' "$SESSION" "$((attempts + 1))" "$((cap + 1))"
+              exit 0
+            fi
+            printf '  a ceiling refused the retry — escalating instead\n'
+          fi
+
+          # EXHAUSTED. Decision 5, ruled 2026-09-22: the plan records `escalated`, a board item
+          # carries the roadmap §7.3 body, and THE CHAIN HALTS. It does not step to the next
+          # eligible session: a session escalates for a reason, and the next one may depend on
+          # the work that just failed.
+          printf '::warning title=Chain::%s exhausted its retry cap — escalating\n' "$SESSION"
+
+          ./scripts/driver/plan-write.sh --plan "$PLAN" --session "$SESSION" \
+            --status escalated \
+            --evidence "retry cap ${cap} exhausted after ${attempts} attempt(s) · last run: ${RUN_URL}"
+
+          git config user.name  "claude[bot]"
+          git config user.email "41898282+claude[bot]@users.noreply.github.com"
+          branch="escalation/${PLAN_ID}/$(printf '%s' "$SESSION" | tr 'A-Z' 'a-z')"
+          git checkout -q -b "$branch"
+          git add "$PLAN"
+          git commit -q -m "chore(plan): ${SESSION} status=escalated, written by the chain
+
+          The retry cap is exhausted. A person owns this session now: preflight refuses to
+          resume an escalated session, which is what the word is for.
+
+          Last run: ${RUN_URL}"
+          # PUSHED WITH THE PAT, NOT THE CHECKOUT CREDENTIAL. This workflow declares
+          # `permissions: contents: read`, so the token actions/checkout leaves behind cannot
+          # write — and the escalation died here with `403 Write access to repository not
+          # granted` AFTER deciding correctly and writing the plan. Everything that makes an
+          # escalation useful (the branch, the pull request, the board item) is downstream of
+          # this line, so the whole path was unreachable while the decision logic was right.
+          # Raising the workflow's own permissions would widen GITHUB_TOKEN for every step;
+          # naming the credential at the one push that needs it does not.
+          # THE CHECKOUT'S extraheader OVERRIDES A CREDENTIAL IN THE URL, SILENTLY.
+          #
+          # actions/checkout leaves `http.https://github.com/.extraheader` holding an
+          # AUTHORIZATION for the read-only GITHUB_TOKEN, and that header wins over the
+          # userinfo in a push URL. So naming the PAT in the URL changed nothing: the push
+          # still went out as the read-only token and still returned 403, with an error
+          # quoting the remote rather than the URL actually given. Measured twice —
+          # 2026-09-22 before the URL carried a credential at all, and 2026-09-23 after it
+          # did, which is the run that showed the header was the real cause.
+          #
+          # driver.yml already knows this; it unsets the header before restoring its own.
+          # The chain did not, and inherited the defect the driver had already paid for.
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git push -q "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            "HEAD:refs/heads/$branch"
+
+          # The plan change goes through a PR rather than onto main: this workflow may not
+          # write to main, and an escalation a person has to read is exactly the thing that
+          # should arrive as something they act on.
+          pr_url="$(gh pr create --base main --head "$branch" \
+            --title "ESCALATED: ${SESSION} exhausted its retry cap" \
+            --body "$(printf 'Blocked session: %s %s\nAction needed from the owner: read the failing run, decide whether to fix the session or amend the plan, then clear `status: escalated`\nWhy the machine could not do it: approval — the retry cap is exhausted and the driver may not judge its own work further\nWhat resumes when done: the chain, on the next session PR merge; `preflight` refuses this session while it reads `escalated`\nDeadline effect: the plan is halted — no further session is dispatched until this clears\n\nAttempts: %s against retry_cap %s\nLast run: %s\n' \
+              "$PLAN_ID" "$SESSION" "$attempts" "$cap" "$RUN_URL")")"
+          printf '  escalation PR: %s\n' "$pr_url"
+
+          # The board is the message bus (the ops repo's CLAUDE.md). A session that cannot reach
+          # it records the failure rather than skipping silently, which is /wrap-session's
+          # BOARD NOT SYNCED rule applied to a machine.
+          if ! gh issue create --repo "$FACTORY_OPS_REPO" \
+                --title "ESCALATED: ${PLAN_ID} ${SESSION} exhausted its retry cap" \
+                --body "$(printf 'Blocked session: %s %s\nAction needed from the owner: decide whether to fix the session or amend the plan\nWhy the machine could not do it: approval\nWhat resumes when done: the chain\nDeadline effect: the plan is halted\n\nEscalation PR: %s\nLast run: %s\n' \
+                  "$PLAN_ID" "$SESSION" "$pr_url" "$RUN_URL")" >/dev/null 2>&1; then
+            printf '::warning title=Chain::BOARD NOT SYNCED — the escalation issue could not be created; %s is the record\n' "$pr_url"
+          fi
+
+          printf '::error title=Chain halted::%s escalated after %s attempt(s)\n' "$SESSION" "$attempts"
+          exit 1

@@ -1,0 +1,15 @@
+# THE SHAPE THE DRIVER HAD WHEN THE FIRST SERVICE'S PLAN S2 RAN, reduced to the four steps that matter.
+# The toolchain is resolved once, before the agent; the agent then edits the manifest it was
+# resolved from; the gate runs under the stale resolution. This is the defect, kept as a
+# fixture so the rule that catches it can be seen to fire.
+jobs:
+  run:
+    steps:
+      - name: Resolve the toolchain and install the gate's tooling
+        uses: ./.github/actions/toolchain
+      - name: Run the session headless
+        uses: anthropics/claude-code-action@v1
+      - name: Commit the session's work
+        run: git commit -am work
+      - name: Run the session's gate (scripts/check.sh)
+        run: ./scripts/check.sh

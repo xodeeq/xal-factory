@@ -1,0 +1,1 @@
+{"standards":"PASS","spec":"FINDINGS","findings":[{"axis":"spec","ref":"FX-FR-02","where":"internal/fixture/a.go","what":"FX-FR-02 is cited by the session and no test asserts it"}]}

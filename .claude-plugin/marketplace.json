@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "xal-factory",
-      "description": "/begin-session and /wrap-session, the concept-note skill, and the service-conventions skill that points at a repo's vendored docs/process/.",
+      "description": "/begin-session, /run-session, /wrap-session, /idea and /explain; the reader agent the merge gate waits for; the concept-note and service-conventions skills.",
       "category": "engineering",
       "source": "./plugins/xal-factory"
     }

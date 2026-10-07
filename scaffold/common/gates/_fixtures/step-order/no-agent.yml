@@ -1,0 +1,7 @@
+# Not a driver at all. Cannot-run (2), never a refusal (3): the checker must not report a
+# decision about a file it does not understand.
+jobs:
+  run:
+    steps:
+      - name: Run the session's gate (scripts/check.sh)
+        run: ./scripts/check.sh

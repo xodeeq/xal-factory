@@ -22,3 +22,4 @@
 # are not inputs in the sense this file means: nothing has to be supplied for them to run.
 
 claude-cli | command:claude | yes | npm install -g @anthropic-ai/claude-code | -     | The `claude` CLI, for gate 5 (`claude plugin validate --strict` on the marketplace and every plugin). Offline schema validation only — it never calls the API, so no credential is needed. THIS IS THE INPUT THAT ONCE BROKE CI ON ITS FIRST RUN.
+jq         | command:jq     | yes | -                                       | -     | `jq`, for gate 9 (the reader evaluator's fixtures: scripts/reader-eval.sh reads a verdict with it). Provided by the ubuntu-latest runner image, so no workflow step is needed, and mandatory under CI=true.

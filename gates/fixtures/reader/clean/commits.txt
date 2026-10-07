@@ -1,0 +1,5 @@
+a1b2c3d claude[bot]: test(slug): FX-FR-01 lowercases and hyphenates (RED)
+b2c3d4e claude[bot]: feat(slug): FX-FR-01 (GREEN)
+c3d4e5f claude[bot]: test(slug): FX-FR-02 refuses over 64, accepts 64 (RED)
+d4e5f6a claude[bot]: feat(slug): FX-FR-02 ErrTooLong (GREEN)
+e5f6a7b claude[bot]: chore(plan): S1 status=passed, written by the driver

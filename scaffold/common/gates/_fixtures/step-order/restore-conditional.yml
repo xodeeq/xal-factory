@@ -1,0 +1,19 @@
+# THE SHAPE RUN 35437944054 HAD. The state write is always(), so it runs after an agent
+# failure — but the credential it pushes with is restored only on success. The write then
+# dies unauthenticated and the plan records nothing about a session that already cost money.
+jobs:
+  run:
+    steps:
+      - name: Resolve the toolchain and install the gate's tooling
+        uses: ./.github/actions/toolchain
+      - name: Run the session headless
+        uses: anthropics/claude-code-action@v1
+      - name: Restore the push credential the agent's action revoked
+        run: git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic x"
+      - name: Re-establish the toolchain and the gate's tooling under the session's own tree
+        uses: ./.github/actions/toolchain
+      - name: Run the session's gate (scripts/check.sh)
+        run: ./scripts/check.sh
+      - name: Write status and evidence into the plan
+        if: always()
+        run: git push origin HEAD

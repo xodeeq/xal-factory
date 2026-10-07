@@ -23,6 +23,15 @@
 #   3. every language's ci.yml actually invokes its gate script, and its fixture harness
 #      — a seeded CI that runs neither is the gap wearing a workflow file
 #   4. the seeder refuses a MISSING --lang, and refuses an UNKNOWN one, both with exit 2
+#   5. scaffold/common/ ships the whole PIPELINE: the four workflows, the fixture harness, the
+#      configuration reader, and every scripts/driver/*.sh those files name — and the driver
+#      invokes the gate script, so gate 0 in the seeded repo discovers it as a caller
+#      (ADR-0007 decision 14: the driver lives in the scaffold's common tree)
+#
+# RULE 5'S SCRIPT LIST IS DERIVED, NOT TYPED. The set of driver scripts is whatever the
+# workflows and gates/driver.test.sh reference, read from the scaffold itself, so a script
+# added to the driver and forgotten from the scaffold fails here without anyone updating a
+# list — and a typed list of fifteen names would be a second place for the count to be wrong.
 #
 # RULE 4 IS THE HALF THAT IS NOT ABOUT FILES. A complete overlay behind a seeder that quietly
 # defaults to the first language it finds would put a stack decision in a script — and the
@@ -62,7 +71,20 @@ scripts/check.sh
 .xal/gate-inputs
 .github/workflows/ci.yml
 .github/workflows/deploy.yml
+.github/actions/toolchain/action.yml
 gates/check.test.sh
+"
+
+# The pipeline every seeded repo carries, from scaffold/common/. The driver, chain, merge and
+# reader are language-agnostic (the toolchain is behind the overlay's action above); a missing
+# workflow here is a repo whose plan nobody can run, and it looks exactly like one that runs.
+PIPELINE="
+.github/workflows/driver.yml
+.github/workflows/chain.yml
+.github/workflows/merge.yml
+.github/workflows/reader.yml
+gates/driver.test.sh
+scripts/driver/config.sh
 "
 
 # --- rule 1: languages exist -------------------------------------------------------------
@@ -109,6 +131,39 @@ while IFS= read -r l; do
     || v "RULE 3  scaffold/lang/$l ci.yml never invokes ./gates/check.test.sh — the seeded repo's gate would never be proven able to fail"
 done <<< "$langs"
 
+# --- rule 5: common/ ships the pipeline, whole -----------------------------------------------
+common="$SCAFFOLD/common"
+pipeline_missing=0
+while IFS= read -r want; do
+  [ -n "$want" ] || continue
+  if [ ! -f "$common/$want" ]; then
+    v "RULE 5  scaffold/common is missing $want — a repo seeded from it would have no pipeline, and would not say so"
+    pipeline_missing=1
+  fi
+done <<< "$PIPELINE"
+
+if [ "$pipeline_missing" -eq 0 ]; then
+  # Every scripts/driver/*.sh the workflows and the harness name must ship. Derived from the
+  # files themselves, so the list cannot go stale.
+  named="$(cat "$common"/.github/workflows/driver.yml "$common"/.github/workflows/chain.yml \
+               "$common"/.github/workflows/merge.yml "$common"/.github/workflows/reader.yml \
+               "$common"/gates/driver.test.sh 2>/dev/null \
+           | grep -oE 'scripts/driver/[A-Za-z0-9_-]+\.sh' | sort -u)"
+  if [ -z "$named" ]; then
+    v "RULE 5  nothing in scaffold/common's pipeline names a scripts/driver/*.sh — a driver that runs no script is not a driver"
+  fi
+  while IFS= read -r sc; do
+    [ -n "$sc" ] || continue
+    [ -f "$common/$sc" ] || v "RULE 5  scaffold/common is missing $sc, which the pipeline names — the seeded driver would fail at that step"
+  done <<< "$named"
+
+  # The driver must be a DISCOVERED caller of the gate script: gate 0 in the seeded repo finds
+  # callers by the `./scripts/check.sh` spelling, and a driver that ran the gate only from
+  # inside the agent's prompt would need four inputs nothing obliged it to supply.
+  grep -qE '\./scripts/check\.sh' "$common/.github/workflows/driver.yml" \
+    || v "RULE 5  scaffold/common driver.yml never invokes ./scripts/check.sh — the seeded gate-input check would not see it as a caller"
+fi
+
 # --- rule 4: the seeder refuses to guess a language ------------------------------------------
 # Run the real seeder, twice, with arguments that must be refused. Asserting the REFUSAL by
 # execution rather than by reading the source is the whole point: a default added later would
@@ -137,6 +192,6 @@ if [ "$violations" -ne 0 ]; then
   exit 1
 fi
 
-printf '  %sseed sets complete%s — %s language(s) ship the full artifact set; the seeder refuses to guess one\n' \
+printf '  %sseed sets complete%s — %s language(s) ship the full artifact set, common/ ships the pipeline; the seeder refuses to guess one\n' \
   "$GREEN" "$RST" "$nlang"
 exit 0

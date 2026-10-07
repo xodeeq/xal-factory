@@ -1,0 +1,2 @@
+aaa	refs/heads/main
+bbb	refs/heads/plan/fixture-20260917

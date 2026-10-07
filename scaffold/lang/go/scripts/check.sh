@@ -22,6 +22,7 @@
 #   7. vulnerability audit — govulncheck ./...
 #   8. docker build       — docker build                         (skippable locally)
 #   9. process spec drift  — process-sync.sh --check            (skippable locally)
+#  10. driver fixtures     — gates/driver.test.sh               (no inputs but jq; the pipeline)
 #
 # GOTCHA (gate 1, why `tidy` is diffed and not run): `go mod verify` only checks that the
 # module cache matches the checksums — it says nothing about go.mod being complete or
@@ -52,7 +53,7 @@
 # Usage:  scripts/check.sh        (from anywhere; it cd's to the repo root)
 # Env:    XAL_PROCESS_DIR        path to the process repo checkout (default ../xal-factory)
 #         CI=true                 makes the Docker and drift gates mandatory
-# Deps:   bash, go, gofmt, golangci-lint, govulncheck, docker — all declared in
+# Deps:   bash, go, gofmt, golangci-lint, govulncheck, docker, jq — all declared in
 #         .xal/gate-inputs, which is what gate 0 exists to keep honest.
 
 set -uo pipefail
@@ -200,7 +201,7 @@ lint_step() {
     printf '%s⚠ golangci-lint unavailable — SKIPPING the lint gate (mandatory in CI).%s\n' "$YEL" "$RST"
     return 0
   fi
-  golangci-lint run ./...
+  golangci-lint run --allow-serial-runners ./...
 }
 
 # --- gate 5: test -------------------------------------------------------------
@@ -375,6 +376,38 @@ process_drift_step() {
   esac
 }
 
+# --- gate 10: the pipeline driver is proven able to refuse ------------------------------
+# Safe INSIDE check.sh, unlike gates/check.test.sh, for one mechanical reason: driver.test.sh
+# never invokes check.sh. It exercises scripts/driver/* against committed fixtures under
+# gates/_fixtures/, so there is no recursion to avoid and no reason to make CI remember a
+# second step.
+#
+# What it proves: that the driver REFUSES an unapproved plan, an unsigned approval, an
+# unknown autonomy_level, a session that has already run, one whose dependency has not
+# passed and one a person must unblock first — each naming its reason; that the chain and
+# the merge workflows have the shape their rules demand; that a session lands unattended
+# only when every merge condition holds; and that a plan it cannot parse comes back as
+# CANNOT RUN rather than as a refusal. A driver that refuses everything and a driver that
+# refuses nothing both pass an exit-code-only check.
+#
+# jq is the one input: scripts/driver/reader-verdict.sh parses the reader's verdict file with
+# it. Mandatory under CI=true, skippable locally with a loud warning — the same courtesy the
+# Docker and drift gates extend, and no more.
+driver_fixtures_step() {
+  if ! command -v jq >/dev/null 2>&1; then
+    if [ "${CI:-}" = "true" ]; then
+      printf '%sjq is required in CI for the driver fixtures (reader-verdict.sh reads the verdict with it).%s\n' "$RED" "$RST"
+      return 1
+    fi
+    printf '%s⚠ jq unavailable — SKIPPING the driver fixtures (mandatory in CI).%s\n' "$YEL" "$RST"
+    return 0
+  fi
+  [ -f gates/driver.test.sh ] || {
+    printf '%s  gates/driver.test.sh is missing — the driver is proven by nothing%s\n' "$RED" "$RST"
+    return 1; }
+  bash gates/driver.test.sh
+}
+
 # --- run the gates in CI order -------------------------------------------------
 gate "gate inputs declared + every caller wired"   gate_inputs_step
 gate "modules (go mod verify + tidy diff)"         modules_step
@@ -386,5 +419,6 @@ gate "coverage (per-package floors)"               coverage_step
 gate "vulnerability audit (govulncheck)"           audit_step
 gate "docker image build"                          docker_step
 gate "process spec drift (vendored docs/process/)"   process_drift_step
+gate "driver fixtures (refuses, and says why)"     driver_fixtures_step
 
 summary

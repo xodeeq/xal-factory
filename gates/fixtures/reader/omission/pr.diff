@@ -1,0 +1,31 @@
+diff --git a/head/slug.go b/head/slug.go
+new file mode 100644
+index 0000000..0141548
+--- /dev/null
++++ b/head/slug.go
+@@ -0,0 +1,8 @@
++package slug
++
++import "strings"
++
++// Slug is FX-FR-01: lowercase, each run of spaces one hyphen.
++func Slug(name string) (string, error) {
++	return strings.Join(strings.Fields(strings.ToLower(name)), "-"), nil
++}
+diff --git a/head/slug_test.go b/head/slug_test.go
+new file mode 100644
+index 0000000..a6fbb74
+--- /dev/null
++++ b/head/slug_test.go
+@@ -0,0 +1,11 @@
++package slug
++
++import "testing"
++
++// FX-FR-01
++func TestSlugLowercasesAndHyphenates(t *testing.T) {
++	got, err := Slug("Acme  Corp")
++	if err != nil || got != "acme-corp" {
++		t.Fatalf(`Slug("Acme  Corp") = %q, %v; want "acme-corp", nil`, got, err)
++	}
++}

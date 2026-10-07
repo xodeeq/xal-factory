@@ -4,5 +4,13 @@
 # The process-repo checkout CI makes for the spec-drift gate (see .github/workflows/ci.yml).
 .xal-process/
 
+# The admitted spec, fetched and digest-verified per driver run (scripts/driver/fetch-spec.sh).
+# It belongs to the ops repo and is READ-ONLY here; it is never committed to this repo.
+.xal-spec/
+
+# The reader's working files (reader.yml): the fetched spec, the diff, the PR head worktree and
+# the verdict. Written per run on a runner and never committed.
+.reader/
+
 # OS and editor noise.
 .DS_Store
