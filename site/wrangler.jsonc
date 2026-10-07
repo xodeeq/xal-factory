@@ -1,0 +1,9 @@
+// The docs as a Cloudflare Worker with static assets, on factory.getxal.com. This file IS
+// the deployment setup: nothing is clicked into the dashboard. The custom domain needs the
+// getxal.com zone on the same Cloudflare account; `wrangler deploy` creates the record.
+{
+  "name": "xal-factory-docs",
+  "compatibility_date": "2026-10-07",
+  "assets": { "directory": "./dist", "not_found_handling": "404-page" },
+  "routes": [{ "pattern": "factory.getxal.com", "custom_domain": true }]
+}

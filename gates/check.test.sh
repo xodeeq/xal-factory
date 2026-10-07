@@ -55,7 +55,10 @@ run() {
 
   # Copy the repo minus git history, then overlay the fixture. A fixture may carry a file
   # named DELETE listing paths to remove — the only way to express "this file is missing".
-  ( cd "$ROOT" && tar --exclude='./.git' -cf - . ) | ( cd "$tmp" && tar -xf - )
+  # The site's build artifacts are excluded: they are hundreds of megabytes no gate reads, and
+  # the strip gate scans every file when the copy has no .git.
+  ( cd "$ROOT" && tar --exclude='./.git' --exclude='./site/node_modules' --exclude='./site/dist' \
+      --exclude='./site/.astro' --exclude='./site/src/content/docs/spec' --exclude='./site/src/content/docs/adr' -cf - . ) | ( cd "$tmp" && tar -xf - )
   ( cd "$FIX/$fixture" && tar --exclude='./DELETE' -cf - . ) | ( cd "$tmp" && tar -xf - )
   if [ -f "$FIX/$fixture/DELETE" ]; then
     while IFS= read -r p; do [ -n "$p" ] && rm -rf "$tmp/${p#/}"; done < "$FIX/$fixture/DELETE"
@@ -115,7 +118,9 @@ run gate-10-ops-red          1 'CHECK FAILED at: ops scaffold' \
 run gate-11-bad-default       1 'CHECK FAILED at: options registry' \
     'an option whose default is not one of its choices'
 run gate-12-no-installer      1 'CHECK FAILED at: installer and CLI' \
-    'install.sh is gone, so nothing links the CLI'
+    'an install.sh that links nothing, so the CLI is never installed'
+run gate-14-docs-miss-option  1 'CHECK FAILED at: docs options page' \
+    'the options page generator drops a section'
 run gate-4-broken-sync        1 'CHECK FAILED at: sync round-trip' \
     'process-sync.sh copies nothing — --check would pass vacuously'
 
