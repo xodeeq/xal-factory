@@ -64,3 +64,26 @@ Treat `docs/process/service-conventions.md` and `deployment-conventions.md` as a
 Each **[CI-enforceable]** item you satisfy becomes a gate with a fixture; each
 **[review-only]** item becomes a line in `CLAUDE.md`'s working agreements. Record anything
 you decide *not* to satisfy as an ADR, so the gap is a decision rather than an omission.
+
+## 7. Add the pipeline, when you want agents to build sessions
+
+Optional, and the step to take last: a repo with a trustworthy gate is worth having on its
+own. To let an agent build plan sessions:
+
+1. Seed or name the factory's ops repo (`scaffold/seed-ops.sh`), where admitted specs and the
+   spend ledger live.
+2. Copy from `scaffold/common/`: `.github/workflows/{driver,chain,merge,reader}.yml`,
+   `scripts/driver/`, `gates/driver.test.sh` and `gates/_fixtures/`. From your language's
+   overlay, the toolchain action (`.github/actions/toolchain/`) and `.xal/protected-paths`.
+   Your `ci.yml` should call the same toolchain action, so the driver and CI judge a commit
+   with the same tools.
+3. Write `.xal/factory.conf` with at least `factory.ops_repo = <owner>/<name>`, and add the
+   pipeline's rows to `.xal/gate-inputs` (the Go overlay's file lists them) with real expiry
+   dates. Add `gates/driver.test.sh` to your gate script.
+4. Admit a spec, plan it with the ops repo's `planner` and both halves of the plan critic,
+   merge the plan, and dispatch the first session with `/run-session S1`.
+5. Leave `autonomy_level: unset` in the plan until you have read a few driven sessions
+   yourself. Widening it is a ruling, recorded in the plan's approval.
+
+Anything you do not want running stays committed and disabled (`gh workflow disable
+chain.yml`), so its fixtures keep proving it and turning it on later is one command.

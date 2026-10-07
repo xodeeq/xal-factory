@@ -110,3 +110,41 @@ The spec lives in one place and is vendored read-only into every repo, pinned to
 A local edit cannot be reconciled; it only holds the gate red. A change to the spec bumps
 the version, and every consumer's drift gate stays red until it re-syncs and reviews the
 diff. Seeded files are the opposite: a starting point a repo owns, adapts and never syncs.
+
+## 15. Every option ships with a default
+
+A setting that a person must answer before anything works is a cost on the path of every
+user. Every flag in a service, and every option in the factory itself, carries a default
+that runs, and a deployment or a repo that sets nothing gets the default profile. Only an
+option that genuinely cannot be defaulted is required, with its reason written beside it.
+Engineering complexity may be traded for the user's simplicity, never the other way round.
+
+## 16. One active build track
+
+One person can carry one build at a time. Only the active track ships code, infrastructure
+or repo changes. At most one research lane runs beside it, reading and writing up, and it
+pauses when the build stalls. Two half-finished tracks are worth less than one finished one,
+and the status file is where the one track is named.
+
+## 17. Cost is a design input
+
+An agent on a trigger is an unbounded spend surface. Bound it in the workflow, where a limit
+stops something: a turn cap against loops, a timeout against hangs, and two ceilings, per
+plan and per session, read from a ledger every run appends to, failed runs included. State
+what each bound does not stop. A ceiling bounds spend to `ceiling + one session`, and saying
+otherwise is a promise it cannot keep.
+
+## 18. Autonomy is granted by risk class, never assumed
+
+A machine may merge its own work only inside an autonomy level the owner ruled, and only for
+the risk classes that level admits. Infrastructure, billing, public surfaces and deletions
+are never admitted by any level. The level is widened by a ruling, on evidence of a run of
+passes in a class, and never by a configuration change made to save time.
+
+## 19. The reader reads before anything lands
+
+The gate catches mechanical failure. It cannot catch a test that proves nothing, a cited
+requirement nothing realises, or a standard quietly bent to fit. So every driven session is
+read on two axes, Spec and Standards, by a pinned reader whose own failing fixture it must
+catch, and nothing merges unattended until that reading is clean. The judge cannot be changed
+by the work it judges: every script it runs comes from `main`.
