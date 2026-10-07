@@ -51,3 +51,6 @@ date | context | lesson | proposed home (script/skill/guardrail/ADR) | status (o
 2026-10-06 | installer | A fresh machine has no git identity, and every seeder commits: the CLI checks first, and gates give their throwaway repos one | script | promoted→`xal-factory init`, gate 10, gate 12
 2026-10-06 | installer | `printf … \| grep -q` under pipefail reads a found match as missing: grep exits at the first match and printf dies of SIGPIPE. Use a here-string | guardrail | promoted→scripts/check-options.sh comment; open: a gate for the pattern
 2026-10-06 | second lift | The workflow decision recorded as open: `runs-on` and `timeout-minutes` stay repository variables | ADR | promoted→ADR-0009
+2026-10-07 | docs site | GitHub's `## Heading {#id}` renders as literal text in Astro, so every `#id` link broke: the sync strips the id and points links at the generated slug | script | promoted→site/scripts/sync-content.mjs
+2026-10-07 | docs site | The gate harness copies the repo per fixture, and a site's node_modules made it many times slower: build artifacts are excluded from the copy | script | promoted→gates/check.test.sh
+2026-10-07 | docs site | Deleting a file to make a gate fire also broke every link to it, so an earlier gate fired instead: a fixture breaks the behaviour, not the file's existence | guardrail | promoted→the gate-12 fixture

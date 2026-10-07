@@ -1,0 +1,42 @@
+---
+title: Xal Software Factory
+description: A software factory you can clone and run, from a one-line idea to a monitored service, with a gate at every step.
+template: splash
+hero:
+  tagline: From a one-line idea to a monitored service, with a gate at every step that a script or a named person decides, and agents building inside bounds you set.
+  actions:
+    - text: Install
+      link: /install/
+      icon: right-arrow
+    - text: How it works
+      link: /spec/lifecycle/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+```bash
+curl -fsSL https://factory.getxal.com/install.sh | bash
+```
+
+<CardGrid>
+  <Card title="A gate at every step" icon="approve-check">
+    Specs are admitted verbatim with a digest. Plans are checked by a script and an agent.
+    Every session is judged by the gate the workflow runs, never by what the agent says.
+  </Card>
+  <Card title="Autonomy you grant" icon="setting">
+    Nothing merges without you by default. You widen it by risk class, and infrastructure,
+    billing, public surfaces and deletions never merge unattended.
+  </Card>
+  <Card title="Every option has a default" icon="list-format">
+    Twenty-four options, each with a default and a one-line way to change it later. The
+    onboarding asks only what matters, and `--yes` takes every default.
+  </Card>
+  <Card title="Language behind a contract" icon="puzzle">
+    The spec is language-agnostic and every service vendors it. Go is the first language,
+    and the stack is always a service's first decision record, never a script's default.
+  </Card>
+</CardGrid>
+
+Every rule here was extracted from a private, multi-service estate where it was earned by a
+specific failure. The [principles](/principles/) say which.

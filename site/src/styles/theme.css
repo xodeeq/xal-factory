@@ -1,0 +1,3 @@
+/* The one place the docs' colours live. */
+:root { --sl-color-accent-low: #1d2b1f; --sl-color-accent: #3f8f4f; --sl-color-accent-high: #c9ecd0; }
+:root[data-theme='light'] { --sl-color-accent-low: #d6f0db; --sl-color-accent: #2f7a3e; --sl-color-accent-high: #143a1d; }

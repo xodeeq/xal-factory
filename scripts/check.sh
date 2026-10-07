@@ -109,7 +109,10 @@ manifest_files() {
 # The fixture trees are excluded because their whole purpose is to be broken: a fixture
 # that reintroduces a dangling link must not fail the real gate 2.
 md_files() {
-  find . -path ./.git -prune -o -path ./gates/fixtures -prune -o \
+  # site/ is excluded: its pages are partly generated from the files checked here, link with
+  # site routes (/spec/lifecycle/), and are link-checked by the site build itself
+  # (starlight-links-validator, .github/workflows/site.yml).
+  find . -path ./.git -prune -o -path ./gates/fixtures -prune -o -path ./site -prune -o \
        \( -name '*.md' -o -name '*.md.template' \) -print \
     | sed 's|^\./||' | sort
 }
@@ -532,7 +535,7 @@ install_step() { bash gates/install.test.sh; }
 # --- gate 13: the shell this repo ships is shellcheck-clean -------------------------------
 # Every adopter runs these scripts on their own machine, under whatever bash they have.
 # shellcheck at warning severity; skipped locally without it, mandatory under CI=true.
-SHELLCHECKED="install.sh bin/xal-factory factory/lib.sh scaffold/seed-ops.sh scaffold/seed-service.sh scaffold/common/scripts/driver/config.sh scaffold/common/scripts/smoke.sh scripts/check-options.sh"
+SHELLCHECKED="site/scripts/options-page.sh install.sh bin/xal-factory factory/lib.sh scaffold/seed-ops.sh scaffold/seed-service.sh scaffold/common/scripts/driver/config.sh scaffold/common/scripts/smoke.sh scripts/check-options.sh"
 shellcheck_step() {
   if ! command -v shellcheck >/dev/null 2>&1; then
     if [ "${CI:-}" = "true" ]; then printf '%sshellcheck is required in CI.%s\n' "$RED" "$RST"; return 1; fi
@@ -540,6 +543,22 @@ shellcheck_step() {
   fi
   # shellcheck disable=SC2086
   shellcheck -x -S warning $SHELLCHECKED && printf '  clean: %s\n' "$SHELLCHECKED"
+}
+
+# --- gate 14: the docs' options page names every option ----------------------------------
+# site/scripts/options-page.sh renders factory/options.tsv for factory.getxal.com. It is
+# bash and awk, so this gate runs it without Node and asserts every registry key has its
+# section. The rest of the site is built and link-checked by .github/workflows/site.yml.
+docs_options_step() {
+  local page k missing=0 n=0
+  [ -f site/scripts/options-page.sh ] || { printf '%s  site/scripts/options-page.sh is missing%s\n' "$RED" "$RST"; return 1; }
+  page="$(bash site/scripts/options-page.sh)" || { printf '%s  options-page.sh failed%s\n' "$RED" "$RST"; return 1; }
+  while IFS= read -r k; do
+    n=$((n + 1))
+    grep -qF "### \`$k\`" <<< "$page" || { printf '%s  the options page has no section for %s%s\n' "$RED" "$k" "$RST"; missing=1; }
+  done < <(awk -F'\t' '!/^#/ && NF && $1 != "key" { print $1 }' factory/options.tsv)
+  [ "$n" -gt 0 ] || { printf '%s  no option in the registry: refusing to report green over nothing%s\n' "$RED" "$RST"; return 1; }
+  [ "$missing" = 0 ] && printf '  the options page names all %s option(s)\n' "$n"
 }
 
 # --- run the gates -------------------------------------------------------------
@@ -555,6 +574,7 @@ gate "reader evaluator fixtures (proven able to fail)"     reader_eval_step
 gate "options registry whole and in step"                  options_step
 gate "installer and CLI, end to end"                       install_step
 gate "shell is shellcheck-clean"                           shellcheck_step
+gate "docs options page names every option"               docs_options_step
 gate "ops scaffold seeds a green repo"                     ops_seed_step
 gate "sync round-trip"                                      sync_roundtrip_step
 

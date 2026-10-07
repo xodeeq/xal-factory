@@ -1,0 +1,64 @@
+name: Site
+
+# The documentation at factory.getxal.com. Most pages are the repo's own markdown, copied in
+# by site/scripts/sync-content.mjs, so this runs whenever those sources change. The build
+# fails on any broken internal link (starlight-links-validator). Pull requests build; a push
+# to main builds and deploys.
+#
+# Deploying needs two repository secrets, set by a person: CLOUDFLARE_API_TOKEN (a token
+# scoped to Workers and the getxal.com zone) and CLOUDFLARE_ACCOUNT_ID. Until they exist the
+# deploy job fails loudly and the build job still proves the site.
+on:
+  push:
+    branches: [main]
+    paths: [site/**, spec/**, adr/**, factory/**, PRINCIPLES.md, docs/adopting.md, install.sh, VERSION, .github/workflows/site.yml]
+  pull_request:
+    paths: [site/**, spec/**, adr/**, factory/**, PRINCIPLES.md, docs/adopting.md, install.sh, VERSION, .github/workflows/site.yml]
+  workflow_dispatch:
+
+concurrency:
+  group: site-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and link-check the docs
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    defaults: { run: { working-directory: site } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: npm, cache-dependency-path: site/package-lock.json }
+      - run: npm ci --no-fund --no-audit
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with: { name: site, path: site/dist, retention-days: 7 }
+
+  deploy:
+    name: Deploy to factory.getxal.com
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
+    concurrency: { group: site-deploy, cancel-in-progress: false }
+    defaults: { run: { working-directory: site } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: npm, cache-dependency-path: site/package-lock.json }
+      - run: npm ci --no-fund --no-audit
+      - uses: actions/download-artifact@v4
+        with: { name: site, path: site/dist }
+      - name: Deploy (wrangler.jsonc is the whole configuration)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set: a person sets it (see this file's header)"; exit 1; }
+          npx wrangler deploy
+      - name: Smoke the live docs
+        run: |
+          curl -fsS -o /dev/null https://factory.getxal.com/
+          curl -fsS https://factory.getxal.com/install.sh | head -1 | grep -q '^#!/usr/bin/env bash'

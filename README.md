@@ -12,6 +12,9 @@ they read as decisions rather than preferences.
 
 > **LANGUAGE IS AN IMPLEMENTATION DETAIL BEHIND A STANDARD CONTRACT.**
 
+**Documentation: [factory.getxal.com](https://factory.getxal.com)**, built from this repo's own
+markdown, so it says what the spec says.
+
 ## The lifecycle
 
 1. **Idea**: one line, `/idea`, into the ops repo's inbox.
@@ -45,6 +48,7 @@ default.
 | [`adr/`](adr/) | The factory's decisions: sync, seeding, the plugin boundary, declared inputs, the plan format, the problem document, the driver, auto-merge. |
 | [`docs/lift-ledger.md`](docs/lift-ledger.md) | Where every lifted file came from, and what was stripped on the way. |
 | [`install.sh`](install.sh), [`bin/xal-factory`](bin/xal-factory), [`factory/options.tsv`](factory/options.tsv) | The installer, the command line (`init`, `seed`, `config`, `enable`, `disable`, `apply`, `doctor`), and the one registry of every option with its default. |
+| [`site/`](site/) | The documentation site (Astro Starlight, a Cloudflare Worker at factory.getxal.com). Its spec, decision and principles pages are copied from this repo at build time, its options page is generated from the registry, and it serves `install.sh`. |
 | [`scripts/check.sh`](scripts/check.sh) | This repo's own gate. CI runs this exact script, and [`gates/check.test.sh`](gates/check.test.sh) proves each of its gates can fail. |
 
 ## Quickstart
