@@ -70,26 +70,49 @@ jobs:
     needs: gate
     runs-on: ${{ vars.XAL_RUNNER || 'ubuntu-latest' }}
     steps:
-      # Deliberately a single failing step, not a half-written pipeline.
-      #
-      # The three steps this job will have are named in the message below, and each needs a
-      # provisioned target before it can be written honestly: migrations run as a release-step
-      # ARTIFACT (the same image, its `migrate` subcommand — never from the runtime container
-      # and never from app startup, idempotent by the migration tool's version table); then
-      # the deploy; then a post-deploy smoke test that fails the workflow on a broken
-      # round-trip.
-      #
-      # Writing them now against a host nobody has chosen would produce three steps that have
-      # never run, in a workflow nothing triggers — which reads, to anyone scanning the repo,
-      # exactly like a working deploy pipeline. A loud stop is the honest state.
-      - name: No deploy target provisioned
+      - uses: actions/checkout@v4
+
+      # deploy.target and deploy.url from .xal/factory.conf (scripts/driver/config.sh).
+      - name: Read the factory configuration
+        run: ./scripts/driver/config.sh --emit | tee -a "$GITHUB_ENV"
+
+      - name: Unknown deploy target
+        if: env.FACTORY_DEPLOY_TARGET != 'none' && env.FACTORY_DEPLOY_TARGET != 'fly'
         run: |
-          echo "::error::This service has no deploy target yet, so there is nothing to deploy to."
-          echo "The gate job above passed — the code is releasable; the destination does not exist."
-          echo
-          echo "This job becomes: (1) migrations as a release-step artifact,"
-          echo "                  (2) the deploy itself,"
-          echo "                  (3) a post-deploy smoke gate,"
-          echo "once the deploy target is provisioned. That is a person's decision."
-          echo "See the dispatch-only banner at the top of this workflow."
+          echo "::error::deploy.target '$FACTORY_DEPLOY_TARGET' has no adapter in this workflow (none, fly)."
           exit 1
+
+      # deploy.target = none: a single failing step, not a half-written pipeline. Steps
+      # written against a host nobody has chosen would have never run, in a workflow nothing
+      # triggers, and would read to anyone scanning the repo exactly like a working deploy
+      # pipeline. A loud stop is the honest state.
+      - name: No deploy target provisioned
+        if: env.FACTORY_DEPLOY_TARGET == 'none'
+        run: |
+          echo "::error::deploy.target is none: this service has no deploy target, so there is nothing to deploy to."
+          echo "The gate job above passed: the code is releasable; the destination does not exist."
+          echo "Provision a target (a person's decision: it spends and grants access), then set"
+          echo "deploy.target and deploy.url in .xal/factory.conf. See docs/deploy.md."
+          exit 1
+
+      # deploy.target = fly. The image's `migrate` subcommand runs as Fly's release_command
+      # (fly.toml), so migrations are a release step from the same build, never run from app
+      # startup. FLY_API_TOKEN is declared in .xal/gate-inputs with its expiry when this target
+      # is chosen.
+      - name: Set up flyctl
+        if: env.FACTORY_DEPLOY_TARGET == 'fly'
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy (release_command migrates first)
+        if: env.FACTORY_DEPLOY_TARGET == 'fly'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only
+
+      # The post-deploy gate: a deploy is done when the live URL proves it, not when the host
+      # says it started. scripts/smoke.sh fails the workflow on any broken check.
+      - name: Smoke the live deployment
+        if: env.FACTORY_DEPLOY_TARGET != 'none'
+        run: |
+          [ "$FACTORY_DEPLOY_URL" != none ] || { echo "::error::deploy.url is none: there is no live URL to smoke"; exit 1; }
+          ./scripts/smoke.sh "$FACTORY_DEPLOY_URL"

@@ -51,6 +51,8 @@ Format: `source:path` → `factory path` · stripped · parameterized.
 | xal-company:scripts/status-render.sh, tests/status-render.test.sh + fixtures, .github/workflows/nudge.yml, gates.yml | scaffold/ops/ | locale, history, the claude CLI step | the status template ships with placeholders |
 | xal-company:.claude/agents/{planner,plan-critic,adr-critic,idea-triage}.md; workspace .claude/agents/{research,system}.md | scaffold/ops/.claude/agents/ | company frontmatter, pattern codes, principle numbers, the person, product ids | the decision map is the `decision-map` label |
 | (new) | scaffold/seed-ops.sh, scaffold/ops/{scripts/check.sh,gates/check.test.sh,CLAUDE.md.template,status/current.md,.xal/gate-inputs} | — | an empty intake tree passes with a printed notice, and only when the ledger is empty too |
+| xal-auth:.github/workflows/deploy.yml, fly.toml, scripts/smoke.sh | scaffold/lang/go/.github/workflows/deploy.yml (adapter), scaffold/common/deploy/fly.toml.example, scaffold/common/scripts/smoke.sh | the app name and URL, the .NET listeners, the token lifecycle checks | `deploy.target` and `deploy.url`; the smoke proves health and the §10 problem document, service checks go in `scripts/smoke.d/`; FLY_API_TOKEN gets a gate-inputs row, which the source lacked |
+| xal-org:docs/runbook-alerts.md | scaffold/common/docs/runbook-alerts.md | the unit's alerts | a template, "documents, not wiring" |
 | xal-company:scripts/reader-eval.sh, gates/reader-eval.test.sh, gates/fixtures/reader, .github/workflows/reader-eval.yml | same paths | plugin name, run id | gate 9 here |
 
 ## Deferred
@@ -65,6 +67,8 @@ bring it in. Nothing enters without a caller.
 | xal-platform:adr/0006, 0007, 0008 | already re-recorded as adr/0002, 0003, 0004 on 2026-09-20 | none |
 | xal-company:docs/adr/0001-0004, 0006, 0007 | product or company specific | none |
 | xal-platform:scaffold/common/.github/workflows/board-add.yml | dropped at the first extraction and still dropped | `ops.board = github-projects` gains a caller |
+| xal-org:internal/platform/{telemetry,httpx} | about 3,600 lines with OTel and Prometheus dependencies; the seeded binary is a deliberate stub, so this would make the scaffold a framework | a second Go service would copy it, or an adopter asks for a reference implementation |
+| xal-auth:infra/observability (pattern B) | an open decision in the factory too | a target with a monitoring stack is chosen |
 | xal-company:.claude/agents/{chief-of-staff,process-engineer}.md | no caller yet | the improvement session is built |
 | xal-company:scripts/{board.sh,board-hygiene.sh,triage-load.sh,check-replicas.sh,check-unused.sh,frontmatter-check.sh} | no caller yet | `ops.board = github-projects`, a second replica pair, or a document schema |
 | xal-company:plugins/xcos-core/commands/wrap-session.md | the factory's own generalized `/wrap-session` (2026-09-20) is kept | a ritual step the factory lacks proves itself |

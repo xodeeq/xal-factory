@@ -1,0 +1,43 @@
+# fly.toml for deploy.target = fly. Copy to fly.toml at the repo root when the target is
+# provisioned (a person's act: it spends and grants access), set the app name, and set
+# deploy.url in .xal/factory.conf to the app's URL.
+
+app = "<SERVICE>"
+primary_region = "<region>"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Migrations are a RELEASE STEP from the same image, never run from app startup.
+[deploy]
+  release_command = "/<SERVICE> migrate"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # A service on a user's critical path keeps one machine running; one that is not may
+  # stop when idle. Decide per service and say why in an ADR.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # Readiness gates traffic: 200 only when hard dependencies answer.
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health/ready"
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "15s"
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health/live"
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "10s"
+
+# /metrics on a SECOND port that no service block publishes, so it is reachable only over
+# the private network. A public /metrics is a leak, and was once a live one.
+[metrics]
+  port = 9091
+  path = "/metrics"
