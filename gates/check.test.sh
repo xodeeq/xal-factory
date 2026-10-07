@@ -115,7 +115,7 @@ run gate-10-ops-red          1 'CHECK FAILED at: ops scaffold' \
 run gate-11-bad-default       1 'CHECK FAILED at: options registry' \
     'an option whose default is not one of its choices'
 run gate-12-no-installer      1 'CHECK FAILED at: installer and CLI' \
-    'install.sh is gone, so nothing links the CLI'
+    'an install.sh that links nothing, so the CLI is never installed'
 run gate-4-broken-sync        1 'CHECK FAILED at: sync round-trip' \
     'process-sync.sh copies nothing — --check would pass vacuously'
 
