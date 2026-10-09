@@ -1,6 +1,6 @@
 {
   "name": "xal-factory",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The Xal Software Factory: the begin, run and wrap session commands, /idea and /explain, the reader agent that judges every driven session on Spec and Standards, the concept-note discipline and the service conventions. Install in any repo seeded by the factory.",
   "author": {
     "name": "xodeeq",
