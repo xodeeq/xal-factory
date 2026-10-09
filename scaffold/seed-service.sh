@@ -276,7 +276,9 @@ ${YEL}${BOLD}Human-only, and neither CI nor the pipeline is live until these are
        CLAUDE_CODE_OAUTH_TOKEN   runs the driver, the reader, @claude and the review bot
        FACTORY_READ_TOKEN        reads the ops repo (the admitted spec) for the driver and reader
        FACTORY_WRITE_TOKEN       opens and merges session PRs, dispatches the chain, appends to
-                                 the spend ledger in the ops repo
+                                 the spend ledger in the ops repo. A CLASSIC token (repo scope)
+                                 for now: fine-grained tokens cannot read check runs.
+     Kinds and permissions: https://factory.getxal.com/credentials/
   4. Write each secret's REAL expiry into .xal/gate-inputs, replacing every
      REPLACE-WITH-THE-TOKEN-EXPIRY. Gate 0 refuses the placeholder until you do, deliberately.
 EOF

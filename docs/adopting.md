@@ -79,7 +79,9 @@ own. To let an agent build plan sessions:
    with the same tools.
 3. Write `.xal/factory.conf` with at least `factory.ops_repo = <owner>/<name>`, and add the
    pipeline's rows to `.xal/gate-inputs` (the Go overlay's file lists them) with real expiry
-   dates. Add `gates/driver.test.sh` to your gate script.
+   dates. Add `gates/driver.test.sh` to your gate script. Set the three secrets: which kind of
+   token each one is, and why `FACTORY_WRITE_TOKEN` is a classic token for now, is on the
+   [Credentials](https://factory.getxal.com/credentials/) page.
 4. Admit a spec, plan it with the ops repo's `planner` and both halves of the plan critic,
    merge the plan, and dispatch the first session with `/run-session S1`.
 5. Leave `autonomy_level: unset` in the plan until you have read a few driven sessions

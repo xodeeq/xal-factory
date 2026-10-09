@@ -53,5 +53,5 @@ xal-factory apply           # once pushed: workflows on or off as the profile sa
 ```
 
 The seeder prints what remains yours: installing the Claude GitHub App, setting three
-secrets, and writing each secret's real expiry into `.xal/gate-inputs`. Gate 0 stays red
+secrets ([Credentials](/credentials/) says which kind of token each one is), and writing each secret's real expiry into `.xal/gate-inputs`. Gate 0 stays red
 until you do, on purpose.

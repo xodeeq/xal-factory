@@ -17,7 +17,7 @@ export default defineConfig({
       customCss: ['./src/styles/theme.css'],
       plugins: [starlightLinksValidator({ errorOnRelativeLinks: false })],
       sidebar: [
-        { label: 'Start', items: ['install', 'onboarding', 'options', 'faq'] },
+        { label: 'Start', items: ['install', 'onboarding', 'credentials', 'options', 'faq'] },
         { label: 'How it works', items: ['spec/lifecycle', 'spec/session-types', 'autonomy', 'principles'] },
         { label: 'The spec', items: [{ autogenerate: { directory: 'spec' } }] },
         { label: 'Decisions', items: [{ autogenerate: { directory: 'adr' } }] },

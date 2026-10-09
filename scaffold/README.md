@@ -27,7 +27,9 @@ closing message says: run the gate locally, create the remote, push, open the fi
 **What remains is a person's**: writing the stack ADR the seed cites; installing the Claude
 GitHub App on the new repo; setting `CLAUDE_CODE_OAUTH_TOKEN`, `FACTORY_READ_TOKEN` and
 `FACTORY_WRITE_TOKEN` as repository secrets; and writing each secret's real expiry into
-`.xal/gate-inputs` in place of the placeholder gate 0 refuses. All are grants or
+`.xal/gate-inputs` in place of the placeholder gate 0 refuses. Which kind of token each
+secret is, and its permissions: https://factory.getxal.com/credentials/ (`FACTORY_WRITE_TOKEN`
+is a classic `repo` token for now). All are grants or
 credentials, and none is scriptable. The seeder prints them and stops rather than reporting
 success over a repo whose workflows are committed and silently inert.
 
