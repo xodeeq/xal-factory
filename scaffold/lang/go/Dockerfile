@@ -9,7 +9,7 @@
 # no dependency on the host it lands on. That portability is deliberate — the hosting
 # question is open, and a static binary keeps the switching cost at zero.
 
-FROM golang:1.25 AS build
+FROM golang:1.26 AS build
 WORKDIR /src
 
 # Copy the module files first so `go mod download` is cached independently of source edits.
