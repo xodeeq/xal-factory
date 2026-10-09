@@ -12,7 +12,7 @@ placeholder, and it warns 30 days before a date passes.
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | the driver, the reader, `@claude` and the review bot | from `claude setup-token` |
 | `FACTORY_READ_TOKEN` | the driver and the reader, to fetch the admitted spec from the ops repo | fine-grained token |
-| `FACTORY_WRITE_TOKEN` | opening and merging session PRs, dispatching the chain, the spend ledger, escalation issues | **classic token, for now** |
+| `FACTORY_WRITE_TOKEN` | opening and merging session PRs, dispatching the chain, the spend ledger, escalation issues | fine-grained token |
 
 ## `CLAUDE_CODE_OAUTH_TOKEN`
 
@@ -31,30 +31,25 @@ If the ops repo is public, any token with public read works.
 
 ## `FACTORY_WRITE_TOKEN`
 
-**This one must be a classic token with the `repo` scope, or a token minted by a GitHub
-App.** Merge and chain read CI's verdict through the Checks API, and GitHub offers no Checks
-permission to fine-grained tokens. With a fine-grained token, `merge.yml` refuses every
-session with `Resource not accessible by personal access token`. Moving that read to an API a
-fine-grained token can reach is tracked in
-[#10](https://github.com/xodeeq/xal-factory/issues/10). This page will change when it lands.
+A fine-grained personal access token on **both** repos, the service and the ops repo:
 
-A classic `repo` token reaches every private repository its account can reach. To keep that
-blast radius small:
+- **Repository access:** the service repo and the ops repo.
+- **Actions:** Read and write. The chain dispatches `driver.yml`, and merge and chain read CI's verdict through the Actions API (`scripts/driver/ci-verdict.sh`).
+- **Contents:** Read and write. Pushing the session branch, merging, and the spend ledger in the ops repo.
+- **Pull requests:** Read and write. Opening, updating and merging the session PR.
+- **Issues:** Read and write. Escalation issues in the ops repo.
+- **Commit statuses:** Read-only. The reader's verdict.
+- **Metadata:** Read-only, added automatically.
 
-- Mint it from a dedicated machine account that is a collaborator on only the service and ops
-  repos, if you can.
-- Give it a short expiry and write that date into `.xal/gate-inputs`.
-- Revoke it when you retire the pipeline.
+A session was driven, read and merged with no person present under exactly this token on
+2026-10-09. If a permission is missing, merge and chain stop at once and name it.
 
-What it does, on two repos:
-
-| Repo | What it needs to do |
-|---|---|
-| the service | push the session branch; open, update and merge the session PR; dispatch `driver.yml` (the chain); read CI's check runs and commit statuses |
-| the ops repo | append to the spend ledger (contents write); open escalation issues |
-
-Once #10 lands, a fine-grained token with these permissions will do: Actions, Contents,
-Pull requests and Issues set to Read and write, and Commit statuses set to Read-only.
+**Repos seeded before 0.2.1** still read CI through the Checks API, which no fine-grained
+token can reach. Their merge refuses every session with `Resource not accessible by personal
+access token`. Either upgrade them (the [0.2.1 release notes](https://github.com/xodeeq/xal-factory/releases/tag/v0.2.1)
+list the files), or use a classic token with the `repo` scope until you do. A classic `repo`
+token reaches every private repository its account can reach, so give it a short expiry and
+retire it once the repo is upgraded.
 
 ## Why the pipeline does not use `GITHUB_TOKEN`
 
