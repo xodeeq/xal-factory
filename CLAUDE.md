@@ -105,10 +105,10 @@ the one gate whose arithmetic is hand-written (coverage), and a clean one. Model
 
 - **A second language overlay.** Go is the only one; the split between `common/` and
   `lang/` has been exercised once, by the language it was designed against.
-- **The pipeline has not run live from this repo.** It is proven by fixtures here and by 145
-  driver fixtures in a seeded repo, and it ran live for weeks in the source estate. The live
-  proof from a factory-seeded repo (one in-class session merges, one out-of-class session
-  stops) is owed, and recorded in the next session handoff when done.
+- **The pipeline has run live once from a factory-seeded repo** (2026-10-08 to 09,
+  `docs/sessions/04.md`): one in-class session was driven, read and merged. Still owed: an
+  out-of-class session that stops, and merge and chain reading CI through an API a
+  fine-grained token can reach (#10).
 - **Telemetry reference implementation.** The Go overlay ships a stub binary, not the
   source's telemetry and HTTP packages (lift ledger, Deferred).
 - **Observability IaC modules in the scaffold.** `deployment-conventions.md` Pattern B
