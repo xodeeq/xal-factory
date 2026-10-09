@@ -163,8 +163,8 @@ jobs:
           # ~12 minutes at 30s. CI on this repo takes ~6; the job timeout is 15, so this bound
           # is what stops a hung CI run from holding the runner to the job's own limit.
           for _ in $(seq 1 24); do
-            concl="$(gh api "repos/${{ github.repository }}/commits/$sha/check-runs" \
-                       --jq '[.check_runs[] | select(.name == "Gates (scripts/check.sh)")] | .[0] | select(.status == "completed") | .conclusion // empty' 2>/dev/null || true)"
+            # Through the Actions API, which a fine-grained token can read (see ci-verdict.sh).
+            concl="$(./scripts/driver/ci-verdict.sh --repo "${{ github.repository }}" --sha "$sha" --job "Gates (scripts/check.sh)" || true)"
             [ -n "$concl" ] && break
             printf '  waiting for the gate verdict on %s…\n' "${sha:0:7}"
             sleep 30

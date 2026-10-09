@@ -12,7 +12,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
         run: |
-          concl="$(gh api "repos/x/y/commits/$sha/check-runs" --jq '.check_runs[].conclusion')"
+          concl="$(./scripts/driver/ci-verdict.sh --repo x/y --sha "$sha" --job "Gates (scripts/check.sh)")"
       - name: Dispatch the driver for the selected session
         env:
           GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}

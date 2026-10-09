@@ -25,8 +25,10 @@
 #      the one workflow that is supposed to ask only "what runs next?".
 #
 #   4. `main` is checked BEFORE the dispatch, as an ORDERING rather than a presence. "The file
-#      mentions check-runs" was true of every draft; what must hold is that the verdict is
-#      read before anything is started on top of it.
+#      reads the verdict" was true of every draft; what must hold is that the verdict is
+#      read before anything is started on top of it. The read is scripts/driver/ci-verdict.sh,
+#      and a read through the Checks API (`check-runs`) is refused: fine-grained tokens have
+#      no Checks permission, so it is a 403 under one (the first live proof, 2026-10-08).
 #
 #   5. Escalation writes the plan AND stops. A chain that escalated and carried on would leave
 #      the escalation as a note nobody has to read — decision 5's ruled shape is escalate and
@@ -102,7 +104,16 @@ if printf '%s\n' "$CODE" | grep -q 'autonomy_level'; then
 fi
 
 # --- 4. main is judged before anything is built on it ------------------------------------
-GREEN_CHECK="$(line_of 'check-runs')"
+CHECKS_API="$(grep -n -- 'check-runs' "$WF" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' | head -1 | cut -d: -f1)"
+if [ -n "$CHECKS_API" ]; then
+  printf 'REFUSED: %s reads a gate verdict through the Checks API at line %s.\n' "$WF" "$CHECKS_API" >&2
+  printf '         GitHub gives fine-grained tokens no Checks permission, so under a\n' >&2
+  printf '         fine-grained FACTORY_WRITE_TOKEN it is a 403 and the chain never advances.\n' >&2
+  printf '         Read it with scripts/driver/ci-verdict.sh (the Actions API).\n' >&2
+  printf '::error title=Chain shape::gate verdict read through the Checks API\n' >&2
+  exit 3
+fi
+GREEN_CHECK="$(line_of 'ci-verdict\.sh --')"
 DISPATCH="$(line_of 'gh workflow run driver.yml')"
 if [ -z "$GREEN_CHECK" ]; then
   printf 'REFUSED: %s never reads a gate verdict for main.\n' "$WF" >&2
@@ -129,7 +140,7 @@ fi
 # So presence and ordering are not enough — the read has to be able to outlast the CI run it
 # is asking about. Checked as the presence of a bounded retry around the read, because that is
 # the property; a single `gh api` call cannot be made correct by any amount of ordering.
-GREEN_LINE="$(line_of 'check-runs')"
+GREEN_LINE="$(line_of 'ci-verdict\.sh --')"
 if [ -n "$GREEN_LINE" ]; then
   window="$(awk -v s="$GREEN_LINE" 'NR >= s - 12 && NR <= s + 12' "$WF")"
   if ! printf '%s\n' "$window" | grep -qE 'for .*seq |while .*; do|until '; then

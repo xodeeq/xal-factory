@@ -15,7 +15,7 @@ jobs:
           GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
         run: |
           for _ in $(seq 1 30); do
-            ci="$(gh api "repos/r/commits/$sha/check-runs" --jq '.x')"
+            ci="$(./scripts/driver/ci-verdict.sh --repo r --sha "$sha" --job "Gates (scripts/check.sh)")"
             [ -n "$ci" ] && break
             sleep 30
           done

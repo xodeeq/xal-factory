@@ -1,19 +1,28 @@
-# The corrected shape: main is judged before anything is built on it, the dispatch carries a
-# credential that can actually trigger work, nothing merges, and an escalation halts.
+# chain/clean.yml broken in one place: main's verdict is read through the Checks API, which a
+# fine-grained FACTORY_WRITE_TOKEN cannot reach, so the chain never advances.
 name: Chain
 on:
   pull_request:
     types: [closed]
+permissions:
+  contents: read
+  actions: read
 jobs:
   advance:
     runs-on: ubuntu-latest
     steps:
+      - name: Is this actually a session of this plan?
+        run: |
+          case "$ref" in
+            ("plan/$plan_id/s"[0-9]*) echo proceed=true ;;
+            (*) echo proceed=false ;;
+          esac
       - name: Refuse to chain onto a red or unjudged main
         env:
           GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
         run: |
           for _ in $(seq 1 24); do
-            concl="$(./scripts/driver/ci-verdict.sh --repo x/y --sha "$sha" --job "Gates (scripts/check.sh)")"
+            concl="$(gh api "repos/x/y/commits/$sha/check-runs" --jq '.check_runs[].conclusion')"
             [ -n "$concl" ] && break
             sleep 30
           done
@@ -22,7 +31,6 @@ jobs:
           GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
         run: |
           gh workflow run driver.yml --ref main -f session="$next"
-          gh pr merge "$pr" --squash
   retry-or-escalate:
     runs-on: ubuntu-latest
     steps:
@@ -30,5 +38,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_WRITE_TOKEN }}
         run: |
+          title="${{ github.event.workflow_run.display_title }}"
           ./scripts/driver/plan-write.sh --plan "$PLAN" --session "$SESSION" --status escalated
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git push -q "https://x-access-token:${GH_TOKEN}@github.com/o/r.git" "HEAD:refs/heads/$b"
           exit 1

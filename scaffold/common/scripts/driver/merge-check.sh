@@ -21,6 +21,10 @@
 #      nothing — CI starts on the driver's last push at the same instant this workflow does —
 #      and "unjudged is not green" then stops every session. chain.yml shipped exactly that
 #      (run 35774727222); presence and ordering were both true and it was still dead.
+#      The read is scripts/driver/ci-verdict.sh, through the Actions API, and the Checks API
+#      (`check-runs`) is refused outright: GitHub gives fine-grained tokens no Checks
+#      permission, so a check-runs read under a fine-grained FACTORY_WRITE_TOKEN is a 403 and
+#      every session stops (the factory's first live proof, 2026-10-08).
 #   5. The reader's verdict is read before the merge (ADR-0009 decision 10: a merge must not
 #      race the reviewer).
 #   6. The merge runs under FACTORY_WRITE_TOKEN. A merge authored by GITHUB_TOKEN triggers no
@@ -89,8 +93,10 @@ DECIDE="$(first_line 'merge-decision\.sh')"
   refuse "merge-decision.sh runs at line $DECIDE, after the merge at line $MERGE" "the decision follows the merge"
 
 # --- 4. CI's verdict is read first, and waited for ---------------------------------------
-CI="$(first_line 'check-runs')"
-[ -n "$CI" ] || refuse "$WF never reads CI's gate verdict for the head" "no CI verdict read"
+CHECKS="$(first_line 'check-runs')"
+[ -z "$CHECKS" ] || refuse "$WF reads CI through the Checks API at line $CHECKS, which a fine-grained FACTORY_WRITE_TOKEN cannot reach (a 403 that stops every session): read it with scripts/driver/ci-verdict.sh" "CI read through the Checks API"
+CI="$(first_line 'ci-verdict\.sh')"
+[ -n "$CI" ] || refuse "$WF never reads CI's gate verdict for the head (scripts/driver/ci-verdict.sh)" "no CI verdict read"
 [ "$CI" -lt "$MERGE" ] || refuse "CI's verdict is read at line $CI, after the merge at line $MERGE" "CI read after the merge"
 window="$(printf '%s\n' "$CODE" | awk -v s="$CI" 'NR >= s - 10 && NR <= s + 10')"
 printf '%s\n' "$window" | grep -qE 'for .*seq |while .*; do|until ' || \
