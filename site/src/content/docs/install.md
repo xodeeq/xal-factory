@@ -25,12 +25,12 @@ It never uses `sudo` and writes nowhere else.
 
 | Option | Effect |
 |---|---|
-| `--ref <tag or branch>` | install a release instead of `main`, for example `--ref v0.2.1` |
+| `--ref <tag or branch>` | install a release instead of `main`, for example `--ref v0.2.2` |
 | `--yes` | take every default without asking |
 | `--no-init` | install only; run `xal-factory init` later |
 | `--no-plugin` | do not offer the Claude Code plugin |
 
-To pass options through `curl`: `curl -fsSL https://factory.getxal.com/install.sh | bash -s -- --ref v0.2.1`.
+To pass options through `curl`: `curl -fsSL https://factory.getxal.com/install.sh | bash -s -- --ref v0.2.2`.
 
 ## From a clone
 
