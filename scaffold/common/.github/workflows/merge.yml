@@ -142,13 +142,13 @@ jobs:
         run: |
           set -uo pipefail
 
-          # ci_verdict <sha> — the gate check's conclusion, or empty if it never completed.
+          # ci_verdict <sha> — the gate job's conclusion, or empty if it never completed. Read
+          # through the Actions API (ci-verdict.sh says why not the Checks API); `unreadable`
+          # ends the wait at once and is never `success`.
           ci_verdict() {
             local sha="$1" c=""
             for _ in $(seq 1 30); do
-              c="$(gh api "repos/$REPO/commits/$sha/check-runs" \
-                     --jq "[.check_runs[] | select(.name == \"$GATE_CHECK\")] | sort_by(.started_at) | last | select(.status == \"completed\") | .conclusion // empty" \
-                     2>/dev/null || true)"
+              c="$(./scripts/driver/ci-verdict.sh --repo "$REPO" --sha "$sha" --job "$GATE_CHECK" || true)"
               [ -n "$c" ] && break
               printf '  waiting for CI on %s…\n' "${sha:0:7}" >&2
               sleep 30

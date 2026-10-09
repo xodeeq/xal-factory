@@ -69,7 +69,7 @@ else BOLD=""; RED=""; GREEN=""; YEL=""; RST=""; fi
 
 for f in "$PREFLIGHT" "$WRITER" "$READER" "scripts/driver/branch-check.sh" "scripts/driver/fetch-spec.sh" \
          "scripts/driver/merge-decision.sh" "scripts/driver/merge-check.sh" "scripts/driver/reader-verdict.sh" \
-         "scripts/driver/run-session-id.sh"; do
+         "scripts/driver/run-session-id.sh" "scripts/driver/ci-verdict.sh"; do
   [ -f "$f" ] || { printf '%s%s not found — there is nothing to prove%s\n' "$RED" "$f" "$RST"; exit 2; }
 done
 [ -d "$FIX" ] || {
@@ -471,6 +471,10 @@ check chain-clean         0 'dispatches with a PAT' \
   'the corrected shape PASSES (guards against a rule that always refuses)' \
   -- bash "$CC" --workflow "$CHF/clean.yml"
 
+check chain-checks-api    3 'through the Checks API' \
+  'a main-verdict read a fine-grained token cannot make is refused' \
+  -- bash "$CC" --workflow "$CHF/checks-api.yml"
+
 # The silent one. GitHub refuses to let GITHUB_TOKEN trigger more work, so a dispatch under it
 # is CREATED AND NEVER RUNS — no error, no annotation. Same family as the 2026-09-20 finding
 # where a push attributed to github-actions[bot] left CI `action_required` and the head unjudged.
@@ -806,6 +810,50 @@ check merge-cannot-run    2 'CANNOT RUN: --ci is required' \
   'a caller that forgot to pass the CI verdict is cannot-run, never a decision' \
   -- bash "$MD" "${ok_args[@]}" --reader success --behind 0
 
+printf '\n%s━━ CI'"'"'s verdict is read through the Actions API, which a fine-grained token can reach%s\n\n' "$BOLD" "$RST"
+
+# The Checks API has no fine-grained permission, so the first live proof's merge was a 403
+# under a fine-grained FACTORY_WRITE_TOKEN. ci-verdict.sh reads the CI workflow's run for the
+# commit, then its gate job. A stub `gh` stands in for the API: CIV_MODE picks its answer.
+CIV="scripts/driver/ci-verdict.sh"
+mkdir -p "$TMP/civ-stub"
+cat > "$TMP/civ-stub/gh" <<'STUB'
+#!/usr/bin/env bash
+case "${CIV_MODE:-}:$2" in
+  (denied:*)             printf 'Resource not accessible by personal access token (HTTP 403)\n'; exit 1 ;;
+  (none:*/runs\?*)       printf '' ;;
+  (*:*/runs\?*)          printf '4242' ;;
+  (running:*/jobs*)      printf '' ;;
+  (green:*/jobs*)        printf 'success' ;;
+  (red:*/jobs*)          printf 'failure' ;;
+esac
+STUB
+chmod +x "$TMP/civ-stub/gh"
+civ() { env PATH="$TMP/civ-stub:$PATH" CIV_MODE="$1" bash "$CIV" --repo o/r --sha 0123456789abcdef; }
+
+check civ-green           0 '^success$' \
+  'a completed green gate job reads as success' -- civ green
+check civ-red             0 '^failure$' \
+  'a completed red gate job reads as failure, never as nothing' -- civ red
+check civ-denied          4 'needs Actions: Read on o/r' \
+  'a token that cannot read Actions ends the wait at once and names the permission' -- civ denied
+if [ "$(civ denied 2>/dev/null)" = unreadable ]; then
+  printf '%s  ✔%s %-26s stdout is `unreadable`: non-empty, and never success\n' "$GREEN" "$RST" "civ-denied-stdout"
+  pass=$((pass + 1))
+else
+  printf '%s  ✗%s %-26s stdout was not `unreadable`\n' "$RED" "$RST" "civ-denied-stdout"
+  fail=$((fail + 1))
+fi
+for mode in none running; do
+  if [ -z "$(civ "$mode" 2>/dev/null)" ]; then
+    printf '%s  ✔%s %-26s prints nothing, so the caller keeps waiting\n' "$GREEN" "$RST" "civ-$mode"
+    pass=$((pass + 1))
+  else
+    printf '%s  ✗%s %-26s printed a verdict for CI that has not finished\n' "$RED" "$RST" "civ-$mode"
+    fail=$((fail + 1))
+  fi
+done
+
 printf '\n%s━━ merge.yml has the shape it must have — each rule guards a merge the decision never approved%s\n\n' "$BOLD" "$RST"
 
 MC="scripts/driver/merge-check.sh"
@@ -814,6 +862,10 @@ MGF="gates/_fixtures/merge"
 check mshape-clean        0 'lands once, pinned' \
   'the corrected shape PASSES (guards against a rule that always refuses)' \
   -- bash "$MC" --workflow "$MGF/clean.yml"
+
+check mshape-checks-api   3 'through the Checks API' \
+  'a CI read a fine-grained token cannot make (403, every session stops) is refused' \
+  -- bash "$MC" --workflow "$MGF/checks-api.yml"
 
 check mshape-two-merges   3 'more than one place' \
   'a second merge site is REFUSED — a path around the decision' \
