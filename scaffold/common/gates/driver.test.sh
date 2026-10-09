@@ -309,6 +309,30 @@ check spec-missing-source 2 'names no file' \
   'a source that does not exist is cannot-run, not a digest refusal' \
   -- bash "$FS" --plan "$FIX/clean.md" --out "$TMP/spec-x.md" --from "$SP/does-not-exist.md"
 
+# The API read names the ops repo's OWNER, taken from factory.ops_repo, never one written into
+# the script: a driver that reaches only its author's account cannot run for an adopter. A stub
+# `gh` records the path it was asked for and serves the fixture spec.
+mkdir -p "$TMP/gh-stub"
+cat > "$TMP/gh-stub/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$2" > "$TMP/gh-stub/asked"
+base64 < "$SP/fixture-spec.md"
+STUB
+chmod +x "$TMP/gh-stub/gh"
+
+check spec-owner-from-conf 0 'matches the digest in the plan' \
+  'the API read is addressed to the owner of factory.ops_repo' \
+  -- env PATH="$TMP/gh-stub:$PATH" FACTORY_OPS_REPO=acme/acme-ops \
+     bash "$FS" --plan "$FIX/clean.md" --out "$TMP/spec-api.md"
+
+if grep -q '^repos/acme/' "$TMP/gh-stub/asked" 2>/dev/null; then
+  printf '%s  ✔%s %-26s asked for %s\n' "$GREEN" "$RST" "spec-owner-not-hardcoded" "$(cat "$TMP/gh-stub/asked")"
+  pass=$((pass + 1))
+else
+  printf '%s  ✗%s %-26s asked for %s, not the ops owner\n' "$RED" "$RST" "spec-owner-not-hardcoded" "$(cat "$TMP/gh-stub/asked" 2>/dev/null)"
+  fail=$((fail + 1))
+fi
+
 printf '\n%s━━ the session prompt is the approved plan, not a paraphrase of it%s\n\n' "$BOLD" "$RST"
 
 PROMPTER="scripts/driver/session-prompt.sh"

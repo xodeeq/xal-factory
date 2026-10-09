@@ -96,11 +96,23 @@ if [ -n "$FROM" ]; then
   origin="$FROM"
 else
   command -v gh >/dev/null 2>&1 || cannot_run "gh is not on PATH and --from was not given"
+  # The repo half of the citation is a bare name, so its owner is the ops repo's owner
+  # (factory.ops_repo), never a name written into this script: an adopter's driver must reach
+  # its own ops repo. An `<owner>/<repo>` citation is taken as written.
+  case "$SPEC_REPO" in
+    */*) SPEC_SLUG="$SPEC_REPO" ;;
+    *)
+      OPS_REPO="${FACTORY_OPS_REPO:-$("$HERE/config.sh" --get factory.ops_repo 2>/dev/null || true)}"
+      case "$OPS_REPO" in
+        */*) SPEC_SLUG="${OPS_REPO%%/*}/$SPEC_REPO" ;;
+        *) cannot_run "cannot tell who owns ${SPEC_REPO}: set factory.ops_repo (<owner>/<repo>) in .xal/factory.conf" ;;
+      esac ;;
+  esac
   # --jq '.content' plus base64 -d rather than the raw media type, so the bytes hashed here
   # are the bytes the API stores, not something a proxy may have re-encoded.
-  if ! gh api "repos/xodeeq/${SPEC_REPO}/contents/${SPEC_PATH}" --jq '.content' 2>/dev/null | base64 -d > "$OUT" 2>/dev/null; then
+  if ! gh api "repos/${SPEC_SLUG}/contents/${SPEC_PATH}" --jq '.content' 2>/dev/null | base64 -d > "$OUT" 2>/dev/null; then
     rm -f "$OUT"
-    cannot_run "could not read ${SPEC_REPO}:${SPEC_PATH} — is the token set and does it grant read on that private repo?"
+    cannot_run "could not read ${SPEC_SLUG}:${SPEC_PATH} — is the token set and does it grant read on that private repo?"
   fi
 fi
 
