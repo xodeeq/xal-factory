@@ -54,6 +54,7 @@ Format: `source:path` → `factory path` · stripped · parameterized.
 | xal-auth:.github/workflows/deploy.yml, fly.toml, scripts/smoke.sh | scaffold/lang/go/.github/workflows/deploy.yml (adapter), scaffold/common/deploy/fly.toml.example, scaffold/common/scripts/smoke.sh | the app name and URL, the .NET listeners, the token lifecycle checks | `deploy.target` and `deploy.url`; the smoke proves health and the §10 problem document, service checks go in `scripts/smoke.d/`; FLY_API_TOKEN gets a gate-inputs row, which the source lacked |
 | xal-org:docs/runbook-alerts.md | scaffold/common/docs/runbook-alerts.md | the unit's alerts | a template, "documents, not wiring" |
 | xal-company:scripts/reader-eval.sh, gates/reader-eval.test.sh, gates/fixtures/reader, .github/workflows/reader-eval.yml | same paths | plugin name, run id | gate 9 here |
+| xal-platform:scaffold/common/{scripts/driver/workflow-context.sh (rule 2), gates/driver.test.sh, gates/_fixtures/workflow-context/exit-code-*.yml, .github/workflows/{merge,chain}.yml} (xal-platform#35, 2026-10-18) | scaffold/common/, same paths | the private repo and PR named in the measurement; the person in the step name | — |
 
 ## Deferred
 
