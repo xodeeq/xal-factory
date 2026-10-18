@@ -1,0 +1,19 @@
+# The same step, corrected: `|| rc=$?` is the one capture bash -e does not act on. The rule
+# must let it through, or it would refuse the fix along with the defect.
+name: Exit code caught with or
+on: workflow_dispatch
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Judge
+        run: |
+          set -uo pipefail
+          # A comment quoting the old shape, `"$(…)"; rc=$?`, is prose and must not be refused.
+          rc=0
+          decision="$(./scripts/driver/merge-decision.sh --session S1 2> "$RUNNER_TEMP/why.txt")" || rc=$?
+          case "$rc" in
+            (0) printf '%s\n' "$decision" ;;
+            (3) printf 'outcome=stop\n' >> "$GITHUB_OUTPUT" ;;
+            (*) exit "$rc" ;;
+          esac

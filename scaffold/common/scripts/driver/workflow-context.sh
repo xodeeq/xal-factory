@@ -32,6 +32,28 @@
 # checks exactly the three contexts that do not exist at job level, in exactly the block where
 # using them is fatal.
 #
+# RULE 2, ADDED 2026-10-18: AN EXIT CODE CAPTURED WHERE `bash -e` HAS ALREADY KILLED THE STEP.
+# A `run:` step with no `shell:` runs as `bash -e {0}`, and `set -uo pipefail` at its top does
+# NOT turn -e off. So in
+#
+#   decision="$(./scripts/driver/merge-decision.sh …)"; rc=$?
+#
+# a non-zero exit ends the step at the assignment, and `rc=$?` never runs. merge.yml was
+# written as if there were no -e ("a refusal's exit 3 must be caught, not fatal"), so a
+# designed refusal turned the job RED with exit 3, posted nothing on the PR, set no label and
+# put nothing on the board, instead of the designed GREEN stop. Measured in the source estate,
+# run 39105618864. chain.yml's "plan complete" exit 4 had the same shape. Every gate said yes,
+# for the same reason as rule 1: no gate reads what a workflow step will DO.
+#
+# The only capture -e does not act on is the right-hand side of `||`:
+#
+#   rc=0; decision="$(…)" || rc=$?
+#
+# so any `name=$?` that is not directly after `||` is refused, whatever the shell. That is
+# stricter than needed for a step with an explicit `shell: bash {0}`, and deliberately so: the
+# `||` form is correct under either shell, and it keeps -e as the safety net for every command
+# the step did not check by hand. Comment lines are ignored, so the explanation can stay.
+#
 # Exit: 0 fine · 3 REFUSED, named · 2 the file could not be read.
 
 set -uo pipefail
@@ -81,5 +103,37 @@ if [ -n "$bad" ]; then
   exit 3
 fi
 
-printf 'no step-only context in any job-level env block of %s\n' "$WF"
+# --- rule 2: an exit code captured after -e has already acted -----------------------------
+# Textual on purpose, like rule 1. Comment lines are skipped; on every other line, each
+# `|| name=$?` is removed first, and any `name=$?` left over is one -e reaches before it does.
+killed="$(awk '
+  /^[[:space:]]*#/ { next }
+  /[A-Za-z_][A-Za-z0-9_]*=\$\?/ {
+    line = $0
+    gsub(/\|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\?/, "", line)
+    if (line ~ /[A-Za-z_][A-Za-z0-9_]*=\$\?/) {
+      txt = $0
+      sub(/^[[:space:]]+/, "", txt)
+      printf("%d\t%s\n", NR, txt)
+    }
+  }
+' "$WF")"
+
+if [ -n "$killed" ]; then
+  printf 'REFUSED: %s captures an exit code that bash -e never lets it see.\n' "$WF" >&2
+  printf '%s\n' "$killed" | while IFS="$(printf '\t')" read -r n txt; do
+    printf '         line %s: %s\n' "$n" "$txt" >&2
+  done
+  printf '\n' >&2
+  printf '         A run: step with no shell: is `bash -e {0}`; `set -uo pipefail` does not undo\n' >&2
+  printf '         the -e. A non-zero exit ends the step BEFORE `name=$?` runs, so a designed\n' >&2
+  printf '         refusal (exit 3) or completion (exit 4) becomes a red job and every line\n' >&2
+  printf '         meant to handle it is skipped. Measured 2026-10-18, source-estate run\n' >&2
+  printf '         39105618864: merge.yml went red instead of stopping for a person.\n' >&2
+  printf '         Capture it where -e does not act:  rc=0; out="$(cmd)" || rc=$?\n' >&2
+  printf '::error title=Workflow exit code::%s captures an exit code after bash -e has acted\n' "$WF" >&2
+  exit 3
+fi
+
+printf 'no step-only context in any job-level env block of %s, and no exit code captured after bash -e has acted\n' "$WF"
 exit 0

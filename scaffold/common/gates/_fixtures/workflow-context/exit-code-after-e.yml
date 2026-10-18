@@ -1,0 +1,18 @@
+# merge.yml's decide step as it shipped: `; rc=$?` under the default `bash -e {0}`. A refusal
+# (exit 3) ends the step at the assignment, so the `case` that would have stopped GREEN never
+# runs. Source-estate run 39105618864, 2026-10-18.
+name: Exit code after -e
+on: workflow_dispatch
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Judge
+        run: |
+          set -uo pipefail
+          decision="$(./scripts/driver/merge-decision.sh --session S1 2> "$RUNNER_TEMP/why.txt")"; rc=$?
+          case "$rc" in
+            (0) printf '%s\n' "$decision" ;;
+            (3) printf 'outcome=stop\n' >> "$GITHUB_OUTPUT" ;;
+            (*) exit "$rc" ;;
+          esac
