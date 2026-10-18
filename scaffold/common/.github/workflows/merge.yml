@@ -183,8 +183,12 @@ jobs:
             sha="$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)"
             printf '━━ round %s: #%s at %s\n' "$round" "$PR" "${sha:0:7}"
 
-            # No `set -e` in this step (a refusal's exit 3 must be caught, not fatal), so every
-            # command whose failure would leave a stale fact behind is checked by hand.
+            # Every command whose failure would leave a stale fact behind is checked by hand.
+            # The step still runs under -e: a `run:` with no `shell:` is GitHub's `bash -e {0}`,
+            # and `set -uo pipefail` above does not undo it. So a refusal's exit 3 is captured
+            # with `|| rc=$?`, the one form -e does not act on. `"$(…)"; rc=$?` died at the
+            # assignment, which turned a designed stop into a red job with nothing on the PR
+            # (source-estate run 39105618864). workflow-context.sh rule 2 refuses that shape.
             git fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" \
               || { printf '::error title=Merge::could not fetch %s\n' "$BRANCH"; exit 2; }
             git show "$sha:$PLAN" > "$RUNNER_TEMP/head-plan.md" \
@@ -201,11 +205,12 @@ jobs:
               || { printf '::error title=Merge::could not compare %s with main\n' "${sha:0:7}"; exit 2; }
             printf '  CI %s · reader %s · behind main by %s\n' "${ci:-none}" "${reader:-none}" "$behind"
 
+            rc=0
             decision="$(./scripts/driver/merge-decision.sh \
                           --main-plan "$PLAN" --head-plan "$RUNNER_TEMP/head-plan.md" \
                           --session "$SESSION" --changed-files "$RUNNER_TEMP/changed.txt" \
                           --ci "$ci" --reader "$reader" --behind "$behind" \
-                          2> "$RUNNER_TEMP/why.txt")"; rc=$?
+                          2> "$RUNNER_TEMP/why.txt")" || rc=$?
             cat "$RUNNER_TEMP/why.txt"
             case "$rc" in
               (0) ;;

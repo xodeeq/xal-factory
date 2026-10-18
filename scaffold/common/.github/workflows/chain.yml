@@ -195,7 +195,10 @@ jobs:
         if: steps.scope.outputs.proceed == 'true'
         run: |
           set -uo pipefail
-          next="$(./scripts/driver/select-next.sh --plan "$PLAN")"; rc=$?
+          # `|| rc=$?`, never `; rc=$?`: this step runs under GitHub's default `bash -e {0}`, so
+          # exit 4 (complete) or 3 would kill it before `rc=$?` ran (workflow-context.sh rule 2).
+          rc=0
+          next="$(./scripts/driver/select-next.sh --plan "$PLAN")" || rc=$?
           case "$rc" in
             (0) printf 'session=%s\n' "$next" >> "$GITHUB_OUTPUT"
                 printf '  next session: %s\n' "$next" ;;
