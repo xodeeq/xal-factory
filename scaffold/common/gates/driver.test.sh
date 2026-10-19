@@ -474,11 +474,23 @@ check wfctx-step-level    0 'no step-only context' \
   'the same context INSIDE a step is legal and must not be refused' \
   -- bash "$WC" --workflow "$WCF/step-level-is-fine.yml"
 
+# Rule 2, added 2026-10-18. merge.yml's designed refusal (exit 3) killed its own step under
+# GitHub's default `bash -e {0}` before `rc=$?` ran: the job went red and nothing reached the
+# PR or the board (source-estate run 39105618864). Both halves: the shipped shape refused, the
+# `|| rc=$?` correction (with the old shape quoted in a comment) let through.
+check wfctx-exit-after-e  3 'never lets it see' \
+  'an exit code captured after `;` under bash -e is REFUSED — the step dies first' \
+  -- bash "$WC" --workflow "$WCF/exit-code-after-e.yml"
+
+check wfctx-exit-or       0 'no exit code captured after bash -e' \
+  'the same capture after `||` PASSES — it is the fix, not the defect' \
+  -- bash "$WC" --workflow "$WCF/exit-code-caught-with-or.yml"
+
 # The live half, and it is the one that protects: the defect can land in ANY workflow, so
 # every one in this repo is judged rather than the two the driver happens to care about.
 for _wf in .github/workflows/*.yml; do
   check "wfctx-$(basename "$_wf" .yml)" 0 'no step-only context' \
-    "the real $(basename "$_wf") can be dispatched" \
+    "the real $(basename "$_wf") can be dispatched, and its exit codes reach their handlers" \
     -- bash "$WC" --workflow "$_wf"
 done
 
